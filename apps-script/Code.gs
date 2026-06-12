@@ -1,0 +1,467 @@
+/**
+ * API Quản lý Nghiên cứu — Khoa Bệnh lý Mạch máu não
+ * Google Apps Script Web App (backend cho React frontend)
+ *
+ * Triển khai: xem HUONG-DAN-TRIEN-KHAI.md
+ * Chạy setupDatabase() MỘT LẦN trước khi deploy.
+ */
+
+// ===================== CẤU HÌNH =====================
+
+var SHEETS = {
+  STUDIES: 'Studies',
+  PATIENTS: 'Patients',
+  MILESTONES: 'Milestones',
+  DOCUMENTS: 'Documents',
+  LOG: 'ActivityLog',
+  USERS: 'Users'
+};
+
+var SCHEMA = {
+  Studies: ['study_id', 'title', 'type', 'sponsor', 'phase', 'status', 'pi_name',
+            'target_n', 'start_date', 'expected_end', 'irb_number', 'irb_expiry'],
+  Patients: ['patient_code', 'study_id', 'screen_date', 'enroll_date', 'status',
+             'withdrawal_reason', 'sub_investigator', 'notes'],
+  Milestones: ['milestone_id', 'study_id', 'milestone_name', 'planned_date',
+               'actual_date', 'status', 'owner'],
+  Documents: ['doc_id', 'study_id', 'doc_type', 'version', 'status',
+              'gdrive_link', 'expiry_date'],
+  ActivityLog: ['timestamp', 'user_email', 'action', 'study_id', 'detail'],
+  Users: ['email', 'role', 'name', 'assigned_studies', 'token'] // role: admin|investigator|readonly
+};
+
+// ===================== KHỞI TẠO DATABASE =====================
+
+/** Chạy 1 lần để tạo toàn bộ sheet + header. An toàn khi chạy lại (không xoá dữ liệu). */
+function setupDatabase() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  Object.keys(SCHEMA).forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) sheet = ss.insertSheet(name);
+    var headers = SCHEMA[name];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+      .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+  });
+  // Thêm chính mình làm admin nếu sheet Users trống (token sinh ngẫu nhiên)
+  var users = ss.getSheetByName(SHEETS.USERS);
+  if (users.getLastRow() < 2) {
+    users.appendRow([Session.getEffectiveUser().getEmail(), 'admin', 'PI', 'ALL', newToken_()]);
+  }
+}
+
+/** Sinh token ngẫu nhiên cho user mới — chạy thủ công rồi dán vào cột token */
+function newToken_() {
+  return Utilities.getUuid().replace(/-/g, '');
+}
+
+// ===================== ENTRY POINTS =====================
+
+function doGet(e) {
+  // Không có ?action → serve luôn frontend React (file Index.html trong project)
+  if (!e || !e.parameter || !e.parameter.action) {
+    var t = HtmlService.createTemplateFromFile('Index');
+    t.apiUrl = ScriptApp.getService().getUrl();
+    return t.evaluate()
+      .setTitle('Quản lý Nghiên cứu — Khoa BLMMN')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
+  return handleRequest(e.parameter, null);
+}
+
+function doPost(e) {
+  var body = {};
+  try { body = JSON.parse(e.postData.contents); } catch (err) {}
+  return handleRequest(e.parameter, body);
+}
+
+function handleRequest(params, body) {
+  var action = (params && params.action) || (body && body.action) || '';
+  var token = (params && params.token) || (body && body.token) || '';
+  var user = getCurrentUser_(token);
+  try {
+    if (!user) return json_({ ok: false, error: 'UNAUTHORIZED', message: 'Token không hợp lệ hoặc chưa được cấp quyền.' });
+
+    var result;
+    switch (action) {
+      // ---- đọc (mọi role) ----
+      case 'listStudies':    result = listStudies_(); break;
+      case 'getStudy':       result = getStudy_(params.study_id); break;
+      case 'listPatients':   result = listRows_(SHEETS.PATIENTS, params.study_id); break;
+      case 'listMilestones': result = withOverdue_(listRows_(SHEETS.MILESTONES, params.study_id)); break;
+      case 'listDocuments':  result = listRows_(SHEETS.DOCUMENTS, params.study_id); break;
+      case 'dashboard':      result = dashboard_(); break;
+      case 'whoami':         result = user; break;
+
+      // ---- ghi (admin / investigator) ----
+      case 'addStudy':        requireRole_(user, ['admin']);                 result = addRow_(SHEETS.STUDIES, body.data, 'study_id', 'NC'); break;
+      case 'updateStudy':     requireRole_(user, ['admin']);                 result = updateRow_(SHEETS.STUDIES, 'study_id', body.data); break;
+      case 'addPatient':      requireWrite_(user, body.data.study_id);       result = addPatient_(body.data); break;
+      case 'updatePatient':   requireWrite_(user, body.data.study_id);       result = updateRow_(SHEETS.PATIENTS, 'patient_code', body.data); break;
+      case 'addMilestone':    requireWrite_(user, body.data.study_id);       result = addRow_(SHEETS.MILESTONES, body.data, 'milestone_id', 'MS'); break;
+      case 'updateMilestone': requireWrite_(user, body.data.study_id);       result = updateRow_(SHEETS.MILESTONES, 'milestone_id', body.data); break;
+      case 'addDocument':     requireWrite_(user, body.data.study_id);       result = addDocument_(body.data); break;
+      case 'updateDocument':  requireWrite_(user, body.data.study_id);       result = updateRow_(SHEETS.DOCUMENTS, 'doc_id', body.data); break;
+
+      // ---- xoá (admin hoặc investigator được assign) ----
+      case 'deleteStudy':     requireRole_(user, ['admin']);                  result = deleteRow_(SHEETS.STUDIES, 'study_id', body.data.study_id); break;
+      case 'deletePatient':   requireWrite_(user, body.data.study_id);        result = deleteRow_(SHEETS.PATIENTS, 'patient_code', body.data.patient_code); break;
+      case 'deleteMilestone': requireWrite_(user, body.data.study_id);        result = deleteRow_(SHEETS.MILESTONES, 'milestone_id', body.data.milestone_id); break;
+      case 'deleteDocument':  requireWrite_(user, body.data.study_id);        result = deleteRow_(SHEETS.DOCUMENTS, 'doc_id', body.data.doc_id); break;
+
+      // ---- quản lý người dùng (admin only) ----
+      case 'listUsers':       requireRole_(user, ['admin']); result = listUsersPublic_(); break;
+      case 'addUser':         requireRole_(user, ['admin']); result = addUser_(body.data); break;
+      case 'updateUser':      requireRole_(user, ['admin']); result = updateRow_(SHEETS.USERS, 'email', body.data); break;
+      case 'deleteUser':      requireRole_(user, ['admin']); result = deleteRow_(SHEETS.USERS, 'email', body.data.email); break;
+      case 'generateToken':   requireRole_(user, ['admin']); result = { token: newToken_() }; break;
+
+      // ---- audit log (admin only) ----
+      case 'listLog':         requireRole_(user, ['admin']); result = readSheet_(SHEETS.LOG).slice(-300).reverse(); break;
+
+      default:
+        return json_({ ok: false, error: 'UNKNOWN_ACTION', action: action });
+    }
+
+    if (body && body.action) {
+      log_(user.email, action, (body.data && body.data.study_id) || '', body.data);
+      invalidateStudiesCache_();
+    }
+    return json_({ ok: true, data: result });
+  } catch (err) {
+    return json_({ ok: false, error: String(err.message || err) });
+  }
+}
+
+// ===================== AUTH =====================
+
+/** Xác thực bằng token (cột token trong sheet Users). Fallback: email Google nếu gọi trực tiếp. */
+function getCurrentUser_(token) {
+  var rows = readSheet_(SHEETS.USERS);
+  if (token) {
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].token) === String(token) && rows[i].token !== '') {
+        return { email: rows[i].email, role: rows[i].role, name: rows[i].name,
+                 assigned_studies: String(rows[i].assigned_studies || '') };
+      }
+    }
+    return null;
+  }
+  var email = Session.getActiveUser().getEmail();
+  if (!email) return null;
+  for (var j = 0; j < rows.length; j++) {
+    if (String(rows[j].email).toLowerCase() === email.toLowerCase()) {
+      return { email: email, role: rows[j].role, name: rows[j].name,
+               assigned_studies: String(rows[j].assigned_studies || '') };
+    }
+  }
+  return null;
+}
+
+function requireRole_(user, roles) {
+  if (roles.indexOf(user.role) === -1) throw new Error('FORBIDDEN: cần quyền ' + roles.join('/'));
+}
+
+/** admin ghi mọi NC; investigator chỉ ghi NC được assign (assigned_studies = "ALL" hoặc "NC001,NC002") */
+function requireWrite_(user, studyId) {
+  if (user.role === 'admin') return;
+  if (user.role === 'investigator') {
+    var assigned = user.assigned_studies;
+    if (assigned === 'ALL' || assigned.split(',').map(function (s) { return s.trim(); }).indexOf(studyId) !== -1) return;
+  }
+  throw new Error('FORBIDDEN: không có quyền ghi trên ' + studyId);
+}
+
+// ===================== BUSINESS LOGIC =====================
+
+var STUDIES_CACHE_KEY = 'listStudies_v1';
+
+function listStudies_() {
+  var sc = CacheService.getScriptCache();
+  var hit = sc.get(STUDIES_CACHE_KEY);
+  if (hit) { try { return JSON.parse(hit); } catch (e) {} }
+
+  var studies = readSheet_(SHEETS.STUDIES);
+  var patients = readSheet_(SHEETS.PATIENTS);
+  studies.forEach(function (st) {
+    st.enrolled_n = patients.filter(function (p) {
+      return p.study_id === st.study_id &&
+             ['Enrolled', 'Completed'].indexOf(p.status) !== -1;
+    }).length;
+  });
+  try { sc.put(STUDIES_CACHE_KEY, JSON.stringify(studies), 60); } catch (e) {}
+  return studies;
+}
+
+function invalidateStudiesCache_() {
+  try { CacheService.getScriptCache().remove(STUDIES_CACHE_KEY); } catch (e) {}
+}
+
+function getStudy_(studyId) {
+  var st = listStudies_().filter(function (s) { return s.study_id === studyId; })[0];
+  if (!st) throw new Error('Không tìm thấy ' + studyId);
+  st.patients = listRows_(SHEETS.PATIENTS, studyId);
+  st.milestones = withOverdue_(listRows_(SHEETS.MILESTONES, studyId));
+  st.documents = listRows_(SHEETS.DOCUMENTS, studyId);
+  return st;
+}
+
+/** Tự sinh patient_code dạng NC001-007 (số thứ tự tiếp theo trong NC đó) */
+function addPatient_(data) {
+  var existing = listRows_(SHEETS.PATIENTS, data.study_id);
+  var maxSeq = existing.reduce(function (m, p) {
+    var n = parseInt(String(p.patient_code).split('-')[1], 10);
+    return isNaN(n) ? m : Math.max(m, n);
+  }, 0);
+  data.patient_code = data.study_id + '-' + padNum_(maxSeq + 1, 3);
+  appendObject_(SHEETS.PATIENTS, data);
+  return data;
+}
+
+/** Khi thêm document Approved cùng study + doc_type → bản Approved cũ thành Superseded */
+function addDocument_(data) {
+  data.doc_id = nextId_(SHEETS.DOCUMENTS, 'doc_id', 'DOC');
+  if (data.status === 'Approved') {
+    var sheet = getSheet_(SHEETS.DOCUMENTS);
+    var rows = readSheet_(SHEETS.DOCUMENTS);
+    var headers = SCHEMA.Documents;
+    rows.forEach(function (r, i) {
+      if (r.study_id === data.study_id && r.doc_type === data.doc_type && r.status === 'Approved') {
+        sheet.getRange(i + 2, headers.indexOf('status') + 1).setValue('Superseded');
+      }
+    });
+  }
+  appendObject_(SHEETS.DOCUMENTS, data);
+  return data;
+}
+
+/** Dashboard: dữ liệu đầy đủ cho trang tổng quan */
+function dashboard_() {
+  var studies = listStudies_();
+  var allMs = withOverdue_(readSheet_(SHEETS.MILESTONES));
+  var docs = readSheet_(SHEETS.DOCUMENTS);
+  var patients = readSheet_(SHEETS.PATIENTS);
+  var today = new Date();
+  var soon = new Date(today.getTime() + 30 * 86400000);
+  var in60 = new Date(today.getTime() + 60 * 86400000);
+  var in90 = new Date(today.getTime() + 90 * 86400000);
+  var mStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  var mEnd = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  var alerts = [];
+
+  studies.forEach(function (st) {
+    if (st.irb_expiry) {
+      var exp = new Date(st.irb_expiry);
+      if (exp <= soon) alerts.push({ level: exp <= today ? 'red' : 'yellow', type: 'IRB_EXPIRY',
+        study_id: st.study_id, message: 'IRB ' + st.study_id + ' hết hạn ' + fmtDate_(exp) });
+    }
+    if (st.status === 'Active' && st.target_n && st.start_date && st.expected_end) {
+      var total = new Date(st.expected_end) - new Date(st.start_date);
+      var elapsed = today - new Date(st.start_date);
+      if (total > 0 && elapsed / total >= 0.5 && st.enrolled_n / st.target_n < 0.7) {
+        alerts.push({ level: 'orange', type: 'SLOW_ENROLLMENT', study_id: st.study_id,
+          message: st.study_id + ' enroll ' + st.enrolled_n + '/' + st.target_n + ' — chậm tiến độ' });
+      }
+    }
+  });
+
+  allMs.filter(function (m) { return m.status === 'Overdue'; }).forEach(function (m) {
+    alerts.push({ level: 'yellow', type: 'MILESTONE_OVERDUE', study_id: m.study_id,
+      message: m.study_id + ': "' + m.milestone_name + '" quá hạn ' + fmtDate_(new Date(m.planned_date)) });
+  });
+
+  docs.forEach(function (d) {
+    if (d.expiry_date && new Date(d.expiry_date) <= soon && d.status === 'Approved') {
+      alerts.push({ level: 'red', type: 'DOC_EXPIRY', study_id: d.study_id,
+        message: 'Tài liệu ' + d.doc_type + ' (' + d.study_id + ') hết hạn ' + fmtDate_(new Date(d.expiry_date)) });
+    }
+  });
+
+  // Stats tổng hợp
+  var statusCounts = {};
+  var enrolledTotal = 0, targetTotal = 0;
+  studies.forEach(function (s) {
+    statusCounts[s.status] = (statusCounts[s.status] || 0) + 1;
+    enrolledTotal += s.enrolled_n || 0;
+    targetTotal += Number(s.target_n) || 0;
+  });
+  var enrolledThisMonth = patients.filter(function (p) {
+    return p.enroll_date && new Date(p.enroll_date) >= mStart && new Date(p.enroll_date) < mEnd;
+  }).length;
+  var msThisMonth = allMs.filter(function (m) {
+    if (!m.planned_date) return false;
+    var d = new Date(m.planned_date);
+    return d >= mStart && d < mEnd;
+  }).length;
+
+  // Milestones sắp tới (60 ngày tới, chưa Done)
+  var upcoming = allMs.filter(function (m) {
+    return m.planned_date && new Date(m.planned_date) <= in60 && m.status !== 'Done';
+  }).sort(function (a, b) { return new Date(a.planned_date) - new Date(b.planned_date); }).slice(0, 8);
+
+  // Tài liệu sắp hết hạn (90 ngày tới)
+  var docDeadlines = docs.filter(function (d) {
+    return d.expiry_date && d.status === 'Approved' && new Date(d.expiry_date) <= in90;
+  }).sort(function (a, b) { return new Date(a.expiry_date) - new Date(b.expiry_date); });
+
+  // Hoạt động gần đây (8 entries cuối)
+  var recentActivity = readSheet_(SHEETS.LOG).slice(-8).reverse();
+
+  // Enrollment theo tháng (6 tháng gần nhất)
+  var enrollByMonth = [];
+  for (var i = 5; i >= 0; i--) {
+    var ms = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    var me = new Date(today.getFullYear(), today.getMonth() - i + 1, 1);
+    var cnt = patients.filter(function (p) {
+      return p.enroll_date && new Date(p.enroll_date) >= ms && new Date(p.enroll_date) < me;
+    }).length;
+    enrollByMonth.push({ month: (ms.getMonth() + 1) + '/' + ms.getFullYear(), count: cnt });
+  }
+
+  return {
+    studies: studies,
+    alerts: alerts,
+    all_milestones: allMs,
+    stats: {
+      status_counts: statusCounts,
+      enrolled_total: enrolledTotal,
+      target_total: targetTotal,
+      enrolled_this_month: enrolledThisMonth,
+      milestones_this_month: msThisMonth,
+      milestones_overdue: allMs.filter(function (m) { return m.status === 'Overdue'; }).length,
+      docs_expiring: docs.filter(function (d) { return d.expiry_date && d.status === 'Approved' && new Date(d.expiry_date) <= soon; }).length
+    },
+    upcoming_milestones: upcoming,
+    doc_deadlines: docDeadlines,
+    recent_activity: recentActivity,
+    enroll_by_month: enrollByMonth
+  };
+}
+
+/** Milestone chưa Done mà quá planned_date → Overdue (tính động, không ghi đè sheet) */
+function withOverdue_(milestones) {
+  var today = new Date();
+  return milestones.map(function (m) {
+    if (m.status !== 'Done' && m.planned_date && new Date(m.planned_date) < today) {
+      return Object.assign({}, m, { status: 'Overdue' });
+    }
+    return m;
+  });
+}
+
+// ===================== SHEET HELPERS =====================
+
+// Cache trong 1 request (mỗi HTTP request là 1 execution context mới)
+var _ss = null;
+var _sheetCache = {};
+
+function getSheet_(name) {
+  if (!_ss) _ss = SpreadsheetApp.getActiveSpreadsheet();
+  return _ss.getSheetByName(name);
+}
+
+function readSheet_(name) {
+  if (_sheetCache[name]) return _sheetCache[name];
+  var sheet = getSheet_(name);
+  var values = sheet.getDataRange().getValues();
+  var headers = values.shift();
+  _sheetCache[name] = values.map(function (row) {
+    var obj = {};
+    headers.forEach(function (h, i) {
+      obj[h] = row[i] instanceof Date ? fmtDate_(row[i]) : row[i];
+    });
+    return obj;
+  });
+  return _sheetCache[name];
+}
+
+function listRows_(name, studyId) {
+  var rows = readSheet_(name);
+  return studyId ? rows.filter(function (r) { return r.study_id === studyId; }) : rows;
+}
+
+function appendObject_(name, data) {
+  var headers = SCHEMA[name];
+  getSheet_(name).appendRow(headers.map(function (h) { return data[h] != null ? data[h] : ''; }));
+}
+
+function addRow_(name, data, idField, prefix) {
+  if (!data[idField]) data[idField] = nextId_(name, idField, prefix);
+  appendObject_(name, data);
+  return data;
+}
+
+function updateRow_(name, idField, data) {
+  var sheet = getSheet_(name);
+  var headers = SCHEMA[name];
+  var rows = readSheet_(name);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][idField]) === String(data[idField])) {
+      headers.forEach(function (h, c) {
+        if (data[h] !== undefined && h !== idField) sheet.getRange(i + 2, c + 1).setValue(data[h]);
+      });
+      return data;
+    }
+  }
+  throw new Error('Không tìm thấy ' + idField + '=' + data[idField]);
+}
+
+function nextId_(name, idField, prefix) {
+  var max = readSheet_(name).reduce(function (m, r) {
+    var n = parseInt(String(r[idField]).replace(prefix, ''), 10);
+    return isNaN(n) ? m : Math.max(m, n);
+  }, 0);
+  return prefix + padNum_(max + 1, 3);
+}
+
+function log_(email, action, studyId, detail) {
+  getSheet_(SHEETS.LOG).appendRow([new Date(), email, action, studyId, JSON.stringify(detail || {})]);
+}
+
+function padNum_(n, width) {
+  var s = String(n);
+  while (s.length < width) s = '0' + s;
+  return s;
+}
+
+function fmtDate_(d) {
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function deleteRow_(name, idField, idValue) {
+  var sheet = getSheet_(name);
+  var rows = readSheet_(name);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][idField]) === String(idValue)) {
+      sheet.deleteRow(i + 2); // +2: 1-indexed và bỏ header
+      return { deleted: idValue };
+    }
+  }
+  throw new Error('Không tìm thấy ' + idField + '=' + idValue);
+}
+
+/** Trả về danh sách user không kèm token (chỉ cờ has_token) */
+function listUsersPublic_() {
+  return readSheet_(SHEETS.USERS).map(function (u) {
+    return { email: u.email, role: u.role, name: u.name,
+             assigned_studies: u.assigned_studies, has_token: u.token !== '' };
+  });
+}
+
+/** Thêm user mới — trả về token 1 lần để admin gửi cho người dùng */
+function addUser_(data) {
+  var existing = readSheet_(SHEETS.USERS);
+  for (var i = 0; i < existing.length; i++) {
+    if (String(existing[i].email).toLowerCase() === String(data.email).toLowerCase()) {
+      throw new Error('Email ' + data.email + ' đã tồn tại trong hệ thống');
+    }
+  }
+  if (!data.token) data.token = newToken_();
+  appendObject_(SHEETS.USERS, data);
+  return { email: data.email, token: data.token };
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}

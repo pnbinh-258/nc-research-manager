@@ -299,3 +299,104 @@ a.link:hover { text-decoration: underline; }
 @media (max-width: 480px) {
   .stats-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* ===== NEWLINE Module ===== */
+
+/* Alert banner */
+.nl-alert-banner {
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+}
+.nl-alert-section { padding: 10px 14px; }
+.nl-alert-section.red { background: var(--red-bg); border-left: 4px solid var(--red); }
+.nl-alert-section.orange { background: var(--orange-bg); border-left: 4px solid var(--orange); }
+.nl-alert-section b { display: block; margin-bottom: 6px; font-size: 13px; }
+.nl-alert-item { font-size: 12px; padding: 2px 0; color: var(--text); }
+.nl-alert-item a { color: inherit; font-weight: 600; }
+
+/* Site grid */
+.nl-site-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.nl-site-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  padding: 14px;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+.nl-site-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+.nl-site-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.nl-site-name { font-weight: 600; font-size: 13px; }
+.nl-site-city { font-size: 11px; color: var(--muted); }
+.nl-site-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
+.nl-site-badge.recruiting { background: var(--green-bg); color: var(--green); }
+.nl-site-badge.not-recruiting { background: #f0f0f0; color: #888; }
+.nl-site-stats { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.nl-enrolled-num { font-size: 24px; font-weight: 700; color: var(--text); }
+.nl-enrolled-label { font-size: 12px; color: var(--muted); }
+.nl-badge-red   { font-size: 11px; background: var(--red-bg);    color: var(--red);    padding: 1px 5px; border-radius: 8px; }
+.nl-badge-orange{ font-size: 11px; background: var(--orange-bg); color: var(--orange); padding: 1px 5px; border-radius: 8px; }
+
+/* Site progress */
+.nl-progress-bar { height: 5px; background: #e8ebef; border-radius: 4px; overflow: hidden; margin-bottom: 3px; }
+.nl-progress-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+.nl-progress-label { font-size: 10px; color: var(--muted); }
+
+/* Site tabs (patient page) */
+.nl-site-tab {
+  padding: 4px 10px; border-radius: 16px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.nl-site-tab.active { background: #0f5132; color: #fff; border-color: #0f5132; }
+.nl-site-tab:hover:not(.active) { background: var(--bg); }
+.nl-tab-count { background: rgba(255,255,255,.3); border-radius: 8px; padding: 0 5px; font-size: 10px; }
+.nl-site-tab:not(.active) .nl-tab-count { background: var(--border); color: var(--muted); }
+
+/* Filter chips (reuse) */
+.filter-chip {
+  padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text);
+}
+.filter-chip.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.filter-chip:hover:not(.active) { background: var(--bg); }
+
+/* Site pill in table */
+.nl-site-pill {
+  display: inline-block; font-size: 11px; font-weight: 700; font-family: monospace;
+  padding: 2px 6px; border-radius: 4px; background: #e8f0fe; color: #1a73e8;
+}
+
+/* mRS badge */
+.nl-mrs-badge {
+  display: inline-block; color: #fff; font-weight: 700; font-size: 11px;
+  padding: 2px 7px; border-radius: 10px;
+}
+
+/* Follow status */
+.nl-follow-status {
+  display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+}
+.nl-status-completed { background: var(--green-bg); color: var(--green); }
+.nl-status-overdue   { background: var(--red-bg);   color: var(--red); }
+.nl-status-upcoming  { background: var(--orange-bg); color: var(--orange); }
+.nl-status-pending   { background: #f0f0f0; color: #888; }
+
+/* Row highlight */
+.nl-row-overdue  td { background: #fff5f5; }
+.nl-row-upcoming td { background: #fff9f0; }
+.nl-row-completed td { background: #f5faf5; }
+
+/* Section title */
+.section-title { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px; }
+
+/* btn-icon */
+.btn-icon { background: none; border: none; cursor: pointer; font-size: 15px; padding: 2px 4px; border-radius: 4px; }
+.btn-icon:hover { background: var(--bg); }
+.btn-icon.danger:hover { background: var(--red-bg); }

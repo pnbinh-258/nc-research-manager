@@ -119,6 +119,16 @@ function handleRequest(params, body) {
       // ---- audit log (admin only) ----
       case 'listLog':         requireRole_(user, ['admin']); result = readSheet_(SHEETS.LOG).slice(-300).reverse(); break;
 
+      // ---- NEWLINE multi-site trial ----
+      case 'nlSetupSheets':   requireRole_(user, ['admin']); result = nlSetupSheets_(); break;
+      case 'nlListSites':     result = nlListSites_(); break;
+      case 'nlDashboard':     result = nlDashboard_(); break;
+      case 'nlListPatients':  result = nlListPatients_(params.site_id); break;
+      case 'nlAddPatient':    requireRole_(user, ['admin','investigator']); result = nlAddPatient_(body.data); break;
+      case 'nlUpdatePatient': requireRole_(user, ['admin','investigator']); result = nlUpdatePatientRow_(body.data); break;
+      case 'nlDeletePatient': requireRole_(user, ['admin']); result = nlDeletePatient_(body.data.patient_id); break;
+      case 'nlUpdateSite':    requireRole_(user, ['admin']); result = nlUpdateSiteRow_(body.data); break;
+
       default:
         return json_({ ok: false, error: 'UNKNOWN_ACTION', action: action });
     }
@@ -464,4 +474,186 @@ function addUser_(data) {
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ===================== NEWLINE MULTI-SITE TRIAL =====================
+
+var NL_SHEETS = { SITES: 'NL_Sites', PATIENTS: 'NL_Patients' };
+
+var NL_SCHEMA = {
+  NL_Sites: ['site_id','site_name','city','status','contact_name','contact_email','contact_phone','pi_name','target_enrollment'],
+  NL_Patients: ['patient_id','site_id','seq_num','enrollment_date','age','sex','diagnosis','mrs_baseline','mrs_3m','outcome_date','notes','created_at'],
+};
+
+var NL_SITES_INIT = [
+  ['ND115','Nhân Dân 115','TP. HCM','Recruiting','','','','',0],
+  ['TNH','Thống Nhất','TP. HCM','Recruiting','','','','',0],
+  ['QY175','Quân Y 175','TP. HCM','Recruiting','','','','',0],
+  ['DNA','Đà Nẵng','Đà Nẵng','Recruiting','','','','',0],
+  ['VTI','Việt Tiệp','Hải Phòng','Recruiting','','','','',0],
+  ['YHN','Y Hà Nội','Hà Nội','Not yet recruiting','','','','',0],
+  ['QY103','Quân Y 103','Hà Nội','Not yet recruiting','','','','',0],
+  ['CTH','Đa Khoa TW Cần Thơ','Cần Thơ','Recruiting','','','','',0],
+  ['UHU','Trung Ương Huế','Huế','Recruiting','','','','',0],
+  ['CDO','Châu Đốc','An Giang','Recruiting','','','','',0],
+];
+
+function nlSetupSheets_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  Object.keys(NL_SCHEMA).forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) sheet = ss.insertSheet(name);
+    var headers = NL_SCHEMA[name];
+    sheet.getRange(1,1,1,headers.length).setValues([headers])
+      .setFontWeight('bold').setBackground('#0f5132').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+  });
+  var sitesSheet = ss.getSheetByName(NL_SHEETS.SITES);
+  if (sitesSheet.getLastRow() < 2) {
+    NL_SITES_INIT.forEach(function(row) { sitesSheet.appendRow(row); });
+  }
+  return { message: 'NEWLINE sheets ready' };
+}
+
+function nlReadSheet_(name) {
+  if (_sheetCache[name]) return _sheetCache[name];
+  var sheet = getSheet_(name);
+  if (!sheet) return [];
+  var values = sheet.getDataRange().getValues();
+  var headers = values.shift();
+  _sheetCache[name] = values.map(function(row) {
+    var obj = {};
+    headers.forEach(function(h, i) { obj[h] = row[i] instanceof Date ? fmtDate_(row[i]) : row[i]; });
+    return obj;
+  });
+  return _sheetCache[name];
+}
+
+function nlListSites_() { return nlReadSheet_(NL_SHEETS.SITES); }
+
+function nlListPatients_(siteId) {
+  var patients = nlReadSheet_(NL_SHEETS.PATIENTS);
+  var today = new Date();
+  var in7 = new Date(today.getTime() + 7 * 86400000);
+  patients = patients.map(function(p) {
+    if (p.enrollment_date) {
+      var due = new Date(new Date(p.enrollment_date).getTime() + 90 * 86400000);
+      p.due_date_3m = fmtDate_(due);
+    }
+    var fs = 'pending';
+    if (String(p.mrs_3m) !== '' && p.mrs_3m !== null && p.mrs_3m !== undefined) {
+      fs = 'completed';
+    } else if (p.due_date_3m) {
+      var dueD = new Date(p.due_date_3m);
+      if (dueD < today) fs = 'overdue';
+      else if (dueD <= in7) fs = 'upcoming';
+    }
+    p.follow_status = fs;
+    return p;
+  });
+  return siteId ? patients.filter(function(p) { return String(p.site_id) === String(siteId); }) : patients;
+}
+
+function nlAddPatient_(data) {
+  var all = nlReadSheet_(NL_SHEETS.PATIENTS);
+  var maxSeq = all.reduce(function(m, p) { var n = parseInt(p.seq_num, 10); return isNaN(n) ? m : Math.max(m, n); }, 0);
+  data.seq_num = maxSeq + 1;
+  data.patient_id = 'NEWLINE-' + data.site_id + '-' + padNum_(data.seq_num, 3);
+  data.created_at = fmtDate_(new Date());
+  var headers = NL_SCHEMA[NL_SHEETS.PATIENTS];
+  getSheet_(NL_SHEETS.PATIENTS).appendRow(headers.map(function(h) { return data[h] != null ? data[h] : ''; }));
+  return data;
+}
+
+function nlUpdatePatientRow_(data) {
+  var sheet = getSheet_(NL_SHEETS.PATIENTS);
+  var headers = NL_SCHEMA[NL_SHEETS.PATIENTS];
+  var rows = nlReadSheet_(NL_SHEETS.PATIENTS);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].patient_id) === String(data.patient_id)) {
+      headers.forEach(function(h, c) {
+        if (data[h] !== undefined && h !== 'patient_id' && h !== 'seq_num' && h !== 'created_at') {
+          sheet.getRange(i + 2, c + 1).setValue(data[h]);
+        }
+      });
+      return data;
+    }
+  }
+  throw new Error('Không tìm thấy patient_id=' + data.patient_id);
+}
+
+function nlDeletePatient_(patientId) {
+  var sheet = getSheet_(NL_SHEETS.PATIENTS);
+  var rows = nlReadSheet_(NL_SHEETS.PATIENTS);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].patient_id) === String(patientId)) {
+      sheet.deleteRow(i + 2);
+      return { deleted: patientId };
+    }
+  }
+  throw new Error('Không tìm thấy ' + patientId);
+}
+
+function nlUpdateSiteRow_(data) {
+  var sheet = getSheet_(NL_SHEETS.SITES);
+  var headers = NL_SCHEMA[NL_SHEETS.SITES];
+  var rows = nlReadSheet_(NL_SHEETS.SITES);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].site_id) === String(data.site_id)) {
+      headers.forEach(function(h, c) {
+        if (data[h] !== undefined && h !== 'site_id') sheet.getRange(i + 2, c + 1).setValue(data[h]);
+      });
+      return data;
+    }
+  }
+  throw new Error('Không tìm thấy site_id=' + data.site_id);
+}
+
+function nlDashboard_() {
+  var sites = nlListSites_();
+  var patients = nlListPatients_();
+  var today = new Date();
+
+  var siteMap = {};
+  sites.forEach(function(s) {
+    siteMap[s.site_id] = Object.assign({}, s, { enrolled: 0, completed_outcome: 0, overdue_outcome: 0, upcoming_outcome: 0 });
+  });
+
+  var alerts = [];
+  patients.forEach(function(p) {
+    if (siteMap[p.site_id]) siteMap[p.site_id].enrolled++;
+    if (p.follow_status === 'completed') {
+      if (siteMap[p.site_id]) siteMap[p.site_id].completed_outcome++;
+    } else if (p.follow_status === 'overdue') {
+      if (siteMap[p.site_id]) siteMap[p.site_id].overdue_outcome++;
+      alerts.push({ level: 'red', patient_id: p.patient_id, site_id: p.site_id, due_date: p.due_date_3m,
+        message: p.patient_id + ' — quá hạn đánh giá 3 tháng (hạn ' + p.due_date_3m + ')' });
+    } else if (p.follow_status === 'upcoming') {
+      if (siteMap[p.site_id]) siteMap[p.site_id].upcoming_outcome++;
+      var daysLeft = Math.ceil((new Date(p.due_date_3m) - today) / 86400000);
+      alerts.push({ level: 'orange', patient_id: p.patient_id, site_id: p.site_id, due_date: p.due_date_3m,
+        message: p.patient_id + ' — đánh giá 3 tháng trong ' + daysLeft + ' ngày (hạn ' + p.due_date_3m + ')' });
+    }
+  });
+  alerts.sort(function(a, b) { return a.level === 'red' && b.level !== 'red' ? -1 : b.level === 'red' && a.level !== 'red' ? 1 : 0; });
+
+  var enrollByMonth = [];
+  for (var i = 5; i >= 0; i--) {
+    var ms = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    var me = new Date(today.getFullYear(), today.getMonth() - i + 1, 1);
+    enrollByMonth.push({
+      month: (ms.getMonth() + 1) + '/' + ms.getFullYear(),
+      count: patients.filter(function(p) { return p.enrollment_date && new Date(p.enrollment_date) >= ms && new Date(p.enrollment_date) < me; }).length,
+    });
+  }
+
+  return {
+    sites: Object.values(siteMap),
+    patients_total: patients.length,
+    completed_total: patients.filter(function(p) { return p.follow_status === 'completed'; }).length,
+    overdue_total: patients.filter(function(p) { return p.follow_status === 'overdue'; }).length,
+    upcoming_total: patients.filter(function(p) { return p.follow_status === 'upcoming'; }).length,
+    alerts: alerts,
+    enroll_by_month: enrollByMonth,
+  };
 }

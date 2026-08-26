@@ -8,6 +8,8 @@ import Patients from './pages/Patients.jsx';
 import Documents from './pages/Documents.jsx';
 import Users from './pages/Users.jsx';
 import ActivityLog from './pages/ActivityLog.jsx';
+import NewlineDashboard from './pages/NewlineDashboard.jsx';
+import NewlinePatients from './pages/NewlinePatients.jsx';
 
 function useHashRoute() {
   const [hash, setHash] = useState(window.location.hash || '#/');
@@ -108,8 +110,12 @@ export default function App() {
     { href: '#/patients',  label: 'Bệnh nhân',    icon: '👤', active: route === '/patients' },
     { href: '#/documents', label: 'Tài liệu',     icon: '📁', active: route === '/documents' },
   ];
+  const newlineNav = [
+    { href: '#/newline',          label: 'Dashboard NC', icon: '🏥', active: route === '/newline' },
+    { href: '#/newline/patients', label: 'Bệnh nhân',    icon: '👥', active: route === '/newline/patients' || route.startsWith('/newline/patients') },
+  ];
   const adminNav = user.role === 'admin' ? [
-    { href: '#/users', label: 'Người dùng', icon: '👥', active: route === '/users' },
+    { href: '#/users', label: 'Người dùng', icon: '👤', active: route === '/users' },
     { href: '#/log',   label: 'Audit Log',  icon: '📝', active: route === '/log' },
   ] : [];
 
@@ -122,6 +128,12 @@ export default function App() {
         </div>
         <div className="nav-section">MENU CHÍNH</div>
         {mainNav.map(n => (
+          <a key={n.href} href={n.href} className={n.active ? 'active' : ''}>
+            <span className="nav-icon">{n.icon}</span>{n.label}
+          </a>
+        ))}
+        <div className="nav-section">NEWLINE</div>
+        {newlineNav.map(n => (
           <a key={n.href} href={n.href} className={n.active ? 'active' : ''}>
             <span className="nav-icon">{n.icon}</span>{n.label}
           </a>
@@ -156,6 +168,8 @@ export default function App() {
         {route === '/documents' && <Documents user={user} />}
         {route === '/users' && user.role === 'admin' && <Users />}
         {route === '/log' && user.role === 'admin' && <ActivityLog />}
+        {route === '/newline' && <NewlineDashboard user={user} />}
+        {route.startsWith('/newline/patients') && <NewlinePatients user={user} />}
       </main>
     </div>
   );

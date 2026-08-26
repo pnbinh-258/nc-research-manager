@@ -3,6 +3,19 @@
 
 const db = {
   user: { email: 'demo@khoa.vn', role: 'admin', name: 'BS. Demo', assigned_studies: 'ALL' },
+  nl_sites: [
+    { site_id: 'ND115', site_name: 'Nhân Dân 115',      city: 'TP.HCM',     status: 'Recruiting',         pi_name: 'PGS.TS Nguyễn Huy Thắng', target_enrollment: 40 },
+    { site_id: 'TNH',   site_name: 'Thống Nhất',         city: 'TP.HCM',     status: 'Recruiting',         pi_name: '',  target_enrollment: 30 },
+    { site_id: 'QY175', site_name: 'Quân Y 175',         city: 'TP.HCM',     status: 'Recruiting',         pi_name: '',  target_enrollment: 20 },
+    { site_id: 'DNA',   site_name: 'Đà Nẵng',            city: 'Đà Nẵng',    status: 'Recruiting',         pi_name: '',  target_enrollment: 30 },
+    { site_id: 'VTI',   site_name: 'Việt Tiệp',          city: 'Hải Phòng',  status: 'Recruiting',         pi_name: '',  target_enrollment: 25 },
+    { site_id: 'YHN',   site_name: 'Y Hà Nội',           city: 'Hà Nội',     status: 'Not yet recruiting', pi_name: '',  target_enrollment: 30 },
+    { site_id: 'QY103', site_name: 'Quân Y 103',         city: 'Hà Nội',     status: 'Not yet recruiting', pi_name: '',  target_enrollment: 20 },
+    { site_id: 'CTH',   site_name: 'ĐKTW Cần Thơ',       city: 'Cần Thơ',    status: 'Recruiting',         pi_name: '',  target_enrollment: 25 },
+    { site_id: 'UHU',   site_name: 'Trung Ương Huế',     city: 'Huế',        status: 'Recruiting',         pi_name: '',  target_enrollment: 20 },
+    { site_id: 'CDO',   site_name: 'Châu Đốc',           city: 'An Giang',   status: 'Recruiting',         pi_name: '',  target_enrollment: 15 },
+  ],
+  nl_patients: [],
   users: [
     { email: 'demo@khoa.vn', role: 'admin', name: 'BS. Demo', assigned_studies: 'ALL', has_token: true },
     { email: 'bs.nguyen@khoa.vn', role: 'investigator', name: 'BS. Nguyễn', assigned_studies: 'NC001,NC002', has_token: true },
@@ -54,6 +67,43 @@ const db = {
         withdrawal_reason: status === 'Withdrawn' ? 'Rút consent' : '',
         sub_investigator: doctors[i % doctors.length],
         notes: '',
+      });
+    }
+  });
+})();
+
+// Seed NEWLINE patients
+(function seedNLPatients() {
+  const siteDist = [
+    { id: 'ND115', n: 18 }, { id: 'TNH', n: 12 }, { id: 'QY175', n: 7 },
+    { id: 'DNA', n: 10 },   { id: 'VTI', n: 8 },  { id: 'CTH', n: 9 },
+    { id: 'UHU', n: 6 },   { id: 'CDO', n: 4 },
+  ];
+  const today = new Date();
+  let seq = 0;
+  siteDist.forEach(({ id, n }) => {
+    for (let i = 0; i < n; i++) {
+      seq++;
+      const daysAgo = 10 + Math.floor(Math.random() * 150);
+      const enrollDate = new Date(today.getTime() - daysAgo * 86400000);
+      const dueDate = new Date(enrollDate.getTime() + 90 * 86400000);
+      const isPast = dueDate < today;
+      const hasOutcome = isPast && Math.random() > 0.3;
+      const mrsBase = Math.floor(Math.random() * 5);
+      const mrs3m = hasOutcome ? String(Math.max(0, mrsBase - Math.floor(Math.random() * 3))) : '';
+      db.nl_patients.push({
+        patient_id: `NEWLINE-${id}-${String(seq).padStart(3, '0')}`,
+        site_id: id,
+        seq_num: seq,
+        enrollment_date: enrollDate.toISOString().slice(0, 10),
+        age: 50 + Math.floor(Math.random() * 30),
+        sex: Math.random() > 0.4 ? 'Nam' : 'Nữ',
+        diagnosis: 'Nhồi máu não cấp',
+        mrs_baseline: String(mrsBase),
+        mrs_3m: mrs3m,
+        outcome_date: hasOutcome ? new Date(dueDate.getTime() + 2 * 86400000).toISOString().slice(0, 10) : '',
+        notes: '',
+        created_at: enrollDate.toISOString().slice(0, 10),
       });
     }
   });
@@ -199,6 +249,103 @@ export function demoCall(action, params = {}, data = {}) {
     case 'deleteUser': { const i = db.users.findIndex((u) => u.email === data.email); if (i>=0) db.users.splice(i,1); return { deleted: data.email }; }
     case 'generateToken': return { token: 'demo-' + Math.random().toString(36).slice(2) };
     case 'listLog': return [...db.log];
+
+    // ---- NEWLINE ----
+    case 'nlListSites': return [...db.nl_sites];
+    case 'nlDashboard': {
+      const today = new Date();
+      const in7 = new Date(today.getTime() + 7 * 86400000);
+      const siteMap = {};
+      db.nl_sites.forEach(s => {
+        siteMap[s.site_id] = { ...s, enrolled: 0, completed_outcome: 0, overdue_outcome: 0, upcoming_outcome: 0 };
+      });
+      const patientsWithStatus = db.nl_patients.map(p => {
+        let due_date_3m = '';
+        if (p.enrollment_date) {
+          const due = new Date(new Date(p.enrollment_date).getTime() + 90 * 86400000);
+          due_date_3m = due.toISOString().slice(0, 10);
+        }
+        let fs = 'pending';
+        if (p.mrs_3m !== '' && p.mrs_3m !== undefined && p.mrs_3m !== null) fs = 'completed';
+        else if (due_date_3m) {
+          const dueD = new Date(due_date_3m);
+          if (dueD < today) fs = 'overdue';
+          else if (dueD <= in7) fs = 'upcoming';
+        }
+        return { ...p, due_date_3m, follow_status: fs };
+      });
+      const alerts = [];
+      patientsWithStatus.forEach(p => {
+        if (siteMap[p.site_id]) siteMap[p.site_id].enrolled++;
+        if (p.follow_status === 'completed' && siteMap[p.site_id]) siteMap[p.site_id].completed_outcome++;
+        else if (p.follow_status === 'overdue') {
+          if (siteMap[p.site_id]) siteMap[p.site_id].overdue_outcome++;
+          alerts.push({ level: 'red', patient_id: p.patient_id, site_id: p.site_id, due_date: p.due_date_3m, message: p.patient_id + ' — quá hạn đánh giá 3 tháng (hạn ' + p.due_date_3m + ')' });
+        } else if (p.follow_status === 'upcoming') {
+          if (siteMap[p.site_id]) siteMap[p.site_id].upcoming_outcome++;
+          const daysLeft = Math.ceil((new Date(p.due_date_3m) - today) / 86400000);
+          alerts.push({ level: 'orange', patient_id: p.patient_id, site_id: p.site_id, due_date: p.due_date_3m, message: p.patient_id + ' — đánh giá 3 tháng trong ' + daysLeft + ' ngày' });
+        }
+      });
+      const enrollByMonth = Array.from({ length: 6 }, (_, i) => {
+        const ms = new Date(today.getFullYear(), today.getMonth() - 5 + i, 1);
+        const me = new Date(today.getFullYear(), today.getMonth() - 5 + i + 1, 1);
+        return { month: `${ms.getMonth()+1}/${ms.getFullYear()}`, count: patientsWithStatus.filter(p => p.enrollment_date && new Date(p.enrollment_date) >= ms && new Date(p.enrollment_date) < me).length };
+      });
+      return {
+        sites: Object.values(siteMap),
+        patients_total: patientsWithStatus.length,
+        completed_total: patientsWithStatus.filter(p => p.follow_status === 'completed').length,
+        overdue_total: patientsWithStatus.filter(p => p.follow_status === 'overdue').length,
+        upcoming_total: patientsWithStatus.filter(p => p.follow_status === 'upcoming').length,
+        alerts: alerts.sort((a, b) => a.level === 'red' ? -1 : 1),
+        enroll_by_month: enrollByMonth,
+      };
+    }
+    case 'nlListPatients': {
+      const today = new Date();
+      const in7 = new Date(today.getTime() + 7 * 86400000);
+      const list = db.nl_patients.map(p => {
+        let due_date_3m = '';
+        if (p.enrollment_date) {
+          const due = new Date(new Date(p.enrollment_date).getTime() + 90 * 86400000);
+          due_date_3m = due.toISOString().slice(0, 10);
+        }
+        let fs = 'pending';
+        if (p.mrs_3m !== '' && p.mrs_3m !== undefined && p.mrs_3m !== null) fs = 'completed';
+        else if (due_date_3m) {
+          const dueD = new Date(due_date_3m);
+          if (dueD < today) fs = 'overdue';
+          else if (dueD <= in7) fs = 'upcoming';
+        }
+        return { ...p, due_date_3m, follow_status: fs };
+      });
+      return params.site_id ? list.filter(p => p.site_id === params.site_id) : list;
+    }
+    case 'nlAddPatient': {
+      const maxSeq = db.nl_patients.reduce((m, p) => Math.max(m, parseInt(p.seq_num) || 0), 0);
+      const seq = maxSeq + 1;
+      const newP = { ...data, seq_num: seq, patient_id: 'NEWLINE-' + data.site_id + '-' + String(seq).padStart(3,'0'), created_at: new Date().toISOString().slice(0,10) };
+      db.nl_patients.push(newP);
+      return newP;
+    }
+    case 'nlUpdatePatient': {
+      const i = db.nl_patients.findIndex(p => p.patient_id === data.patient_id);
+      if (i >= 0) Object.assign(db.nl_patients[i], data);
+      return data;
+    }
+    case 'nlDeletePatient': {
+      const i = db.nl_patients.findIndex(p => p.patient_id === data.patient_id);
+      if (i >= 0) db.nl_patients.splice(i, 1);
+      return { deleted: data.patient_id };
+    }
+    case 'nlSetupSheets': return { message: 'Demo: sheets ready' };
+    case 'nlUpdateSite': {
+      const i = db.nl_sites.findIndex(s => s.site_id === data.site_id);
+      if (i >= 0) Object.assign(db.nl_sites[i], data);
+      return data;
+    }
+
     default: throw new Error('Demo chưa hỗ trợ action: ' + action);
   }
 }

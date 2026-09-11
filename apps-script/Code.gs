@@ -27,14 +27,38 @@ var SCHEMA = {
   Documents: ['doc_id', 'study_id', 'doc_type', 'version', 'status',
               'gdrive_link', 'expiry_date'],
   ActivityLog: ['timestamp', 'user_email', 'action', 'study_id', 'detail'],
-  Users: ['email', 'role', 'name', 'assigned_studies', 'token'] // role: admin|investigator|readonly
+  Users: ['email', 'role', 'name', 'assigned_studies', 'token', 'password_hash'] // role: admin|investigator|readonly
 };
+
+// ===================== SPREADSHEET (STANDALONE) =====================
+
+/** Lấy hoặc tạo Spreadsheet. ID lưu trong PropertiesService để dùng qua mọi lần gọi. */
+function getOrCreateSpreadsheet_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('SS_ID');
+  if (id) {
+    try { return SpreadsheetApp.openById(id); } catch (e) {}
+  }
+  // Chưa có → tạo mới
+  var ss = SpreadsheetApp.create('NC Research Manager — Khoa BLMMN');
+  props.setProperty('SS_ID', ss.getId());
+  return ss;
+}
+
+/** Trả về URL của Spreadsheet hiện tại (hoặc '' nếu chưa khởi tạo). */
+function getSpreadsheetUrl_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('SS_ID');
+  if (!id) return '';
+  return 'https://docs.google.com/spreadsheets/d/' + id;
+}
 
 // ===================== KHỞI TẠO DATABASE =====================
 
 /** Chạy 1 lần để tạo toàn bộ sheet + header. An toàn khi chạy lại (không xoá dữ liệu). */
 function setupDatabase() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getOrCreateSpreadsheet_();
+  var adminToken = '';
   Object.keys(SCHEMA).forEach(function (name) {
     var sheet = ss.getSheetByName(name);
     if (!sheet) sheet = ss.insertSheet(name);
@@ -43,11 +67,51 @@ function setupDatabase() {
       .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
     sheet.setFrozenRows(1);
   });
-  // Thêm chính mình làm admin nếu sheet Users trống (token sinh ngẫu nhiên)
   var users = ss.getSheetByName(SHEETS.USERS);
   if (users.getLastRow() < 2) {
-    users.appendRow([Session.getEffectiveUser().getEmail(), 'admin', 'PI', 'ALL', newToken_()]);
+    adminToken = newToken_();
+    users.appendRow([Session.getEffectiveUser().getEmail(), 'admin', 'PI', 'ALL', adminToken]);
   }
+  return adminToken;
+}
+
+/** Endpoint không cần token — khởi tạo toàn bộ hệ thống lần đầu và trả về token admin. */
+function firstRun_() {
+  var props = PropertiesService.getScriptProperties();
+  var apiUrl = ScriptApp.getService().getUrl();
+
+  // Đã khởi tạo rồi — chỉ trả về url, không lộ token nữa
+  if (props.getProperty('INITIALIZED') === '1') {
+    return { already_setup: true, api_url: apiUrl, spreadsheet_url: getSpreadsheetUrl_() };
+  }
+
+  // Lần đầu: tạo spreadsheet, setup sheets, tạo admin user
+  var adminToken = setupDatabase();
+
+  // Setup NEWLINE sheets luôn
+  var ss = getOrCreateSpreadsheet_();
+  Object.keys(NL_SCHEMA).forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) sheet = ss.insertSheet(name);
+    var headers = NL_SCHEMA[name];
+    sheet.getRange(1,1,1,headers.length).setValues([headers])
+      .setFontWeight('bold').setBackground('#0f5132').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+  });
+  var sitesSheet = ss.getSheetByName(NL_SHEETS.SITES);
+  if (sitesSheet.getLastRow() < 2) {
+    NL_SITES_INIT.forEach(function(row) { sitesSheet.appendRow(row); });
+  }
+
+  props.setProperty('INITIALIZED', '1');
+
+  return {
+    already_setup: false,
+    api_url: apiUrl,
+    admin_token: adminToken,
+    spreadsheet_url: getSpreadsheetUrl_(),
+    owner_email: Session.getEffectiveUser().getEmail(),
+  };
 }
 
 /** Sinh token ngẫu nhiên cho user mới — chạy thủ công rồi dán vào cột token */
@@ -55,10 +119,48 @@ function newToken_() {
   return Utilities.getUuid().replace(/-/g, '');
 }
 
+/**
+ * Chạy hàm này trong Apps Script Editor để lấy/tạo token admin.
+ * Kết quả hiện trong Execution log (Ctrl+Enter hoặc View > Logs).
+ */
+function getOrCreateAdminToken() {
+  var ss = getOrCreateSpreadsheet_();
+  var sheet = ss.getSheetByName('Users');
+  if (!sheet) { Logger.log('Sheet Users chưa tồn tại. Chạy setupDatabase() trước.'); return; }
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var emailCol = headers.indexOf('email');
+  var tokenCol = headers.indexOf('token');
+  var roleCol  = headers.indexOf('role');
+  var myEmail  = Session.getEffectiveUser().getEmail();
+  // Tìm user hiện tại
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][emailCol]).toLowerCase() === myEmail.toLowerCase()) {
+      var tok = String(values[i][tokenCol]);
+      if (!tok) { tok = newToken_(); sheet.getRange(i+1, tokenCol+1).setValue(tok); }
+      Logger.log('=== TOKEN CỦA BẠN ===');
+      Logger.log('Email : ' + myEmail);
+      Logger.log('Token : ' + tok);
+      Logger.log('Role  : ' + values[i][roleCol]);
+      Logger.log('API URL: ' + ScriptApp.getService().getUrl());
+      Logger.log('====================');
+      return tok;
+    }
+  }
+  // Chưa có → tạo mới admin
+  var newTok = newToken_();
+  sheet.appendRow([myEmail, 'admin', 'Admin', 'ALL', newTok]);
+  Logger.log('=== ĐÃ TẠO USER ADMIN MỚI ===');
+  Logger.log('Email : ' + myEmail);
+  Logger.log('Token : ' + newTok);
+  Logger.log('API URL: ' + ScriptApp.getService().getUrl());
+  Logger.log('==============================');
+  return newTok;
+}
+
 // ===================== ENTRY POINTS =====================
 
 function doGet(e) {
-  // Không có ?action → serve luôn frontend React (file Index.html trong project)
   if (!e || !e.parameter || !e.parameter.action) {
     var t = HtmlService.createTemplateFromFile('Index');
     t.apiUrl = ScriptApp.getService().getUrl();
@@ -66,7 +168,49 @@ function doGet(e) {
       .setTitle('Quản lý Nghiên cứu — Khoa BLMMN')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
+  // firstRun trả về trang HTML thay vì JSON
+  if (e.parameter.action === 'firstRun') {
+    try {
+      var result = firstRun_();
+      return HtmlService.createHtmlOutput(buildSetupPage_(result))
+        .setTitle('Khởi tạo hệ thống — NC BLMMN')
+        .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    } catch (err) {
+      return HtmlService.createHtmlOutput('<pre style="color:red">LỖI: ' + err.message + '</pre>')
+        .setTitle('Lỗi khởi tạo');
+    }
+  }
   return handleRequest(e.parameter, null);
+}
+
+function buildSetupPage_(r) {
+  var apiUrlEsc = r.api_url.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  var ssUrlEsc  = r.spreadsheet_url.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  if (r.already_setup) {
+    return '<body style="font-family:sans-serif;padding:40px;max-width:600px;margin:auto">'
+      + '<h2 style="color:#0f5132">✅ Hệ thống đã được khởi tạo trước đó</h2>'
+      + '<p>Đăng nhập tại <a href="https://pnbinh-258.github.io/nc-research-manager/" target="_blank">nc-research-manager</a> bằng API URL và token của bạn.</p>'
+      + '<p><b>API URL:</b> <code style="word-break:break-all">' + apiUrlEsc + '</code></p>'
+      + '<p><a href="' + ssUrlEsc + '" target="_blank">📊 Mở Google Sheets</a></p>'
+      + '</body>';
+  }
+  return '<body style="font-family:sans-serif;padding:40px;max-width:600px;margin:auto;background:#f8fff8">'
+    + '<h2 style="color:#0f5132">🎉 Khởi tạo thành công!</h2>'
+    + '<p>Hệ thống đã tạo Google Sheets và tài khoản admin cho bạn.</p>'
+    + '<div style="background:#fff;border:1px solid #c3e6cb;border-radius:8px;padding:20px;margin:20px 0">'
+    + '<table style="width:100%;border-collapse:collapse">'
+    + '<tr><td style="padding:8px;color:#555;width:140px"><b>API URL</b></td>'
+    + '<td style="padding:8px"><code style="word-break:break-all;background:#f0f0f0;padding:3px 6px;border-radius:4px">' + apiUrlEsc + '</code></td></tr>'
+    + '<tr><td style="padding:8px;color:#555"><b>Token admin</b></td>'
+    + '<td style="padding:8px"><code style="background:#fff3cd;padding:3px 10px;border-radius:4px;font-size:15px;letter-spacing:.05em">' + (r.admin_token || '') + '</code></td></tr>'
+    + '<tr><td style="padding:8px;color:#555"><b>Email</b></td>'
+    + '<td style="padding:8px">' + (r.owner_email || '') + '</td></tr>'
+    + '</table></div>'
+    + '<p>⚠️ <b>Lưu token lại ngay</b> — sẽ không hiển thị lần sau.</p>'
+    + '<p><a href="https://pnbinh-258.github.io/nc-research-manager/" target="_blank" '
+    + 'style="display:inline-block;background:#1a73e8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">▶ Mở ứng dụng & đăng nhập</a>'
+    + '&nbsp;&nbsp;<a href="' + ssUrlEsc + '" target="_blank" style="color:#0f5132">📊 Mở Google Sheets</a></p>'
+    + '</body>';
 }
 
 function doPost(e) {
@@ -78,6 +222,16 @@ function doPost(e) {
 function handleRequest(params, body) {
   var action = (params && params.action) || (body && body.action) || '';
   var token = (params && params.token) || (body && body.token) || '';
+
+  // firstRun và login không cần token
+  if (action === 'firstRun') {
+    try { return json_({ ok: true, data: firstRun_() }); } catch (e) { return json_({ ok: false, error: e.message }); }
+  }
+  if (action === 'login') {
+    try { return json_({ ok: true, data: login_(body.data || {}) }); }
+    catch (e) { return json_({ ok: false, error: e.message }); }
+  }
+
   var user = getCurrentUser_(token);
   try {
     if (!user) return json_({ ok: false, error: 'UNAUTHORIZED', message: 'Token không hợp lệ hoặc chưa được cấp quyền.' });
@@ -115,6 +269,7 @@ function handleRequest(params, body) {
       case 'updateUser':      requireRole_(user, ['admin']); result = updateRow_(SHEETS.USERS, 'email', body.data); break;
       case 'deleteUser':      requireRole_(user, ['admin']); result = deleteRow_(SHEETS.USERS, 'email', body.data.email); break;
       case 'generateToken':   requireRole_(user, ['admin']); result = { token: newToken_() }; break;
+      case 'setPassword':     result = setPassword_(user, body.data); break;
 
       // ---- audit log (admin only) ----
       case 'listLog':         requireRole_(user, ['admin']); result = readSheet_(SHEETS.LOG).slice(-300).reverse(); break;
@@ -124,9 +279,9 @@ function handleRequest(params, body) {
       case 'nlListSites':     result = nlListSites_(); break;
       case 'nlDashboard':     result = nlDashboard_(); break;
       case 'nlListPatients':  result = nlListPatients_(params.site_id); break;
-      case 'nlAddPatient':    requireRole_(user, ['admin','investigator']); result = nlAddPatient_(body.data); break;
-      case 'nlUpdatePatient': requireRole_(user, ['admin','investigator']); result = nlUpdatePatientRow_(body.data); break;
-      case 'nlDeletePatient': requireRole_(user, ['admin']); result = nlDeletePatient_(body.data.patient_id); break;
+      case 'nlAddPatient':    requireRole_(user, ['admin','investigator']); result = nlAddPatient_(body.data); invalidateNlCache_(); break;
+      case 'nlUpdatePatient': requireRole_(user, ['admin','investigator']); result = nlUpdatePatientRow_(body.data); invalidateNlCache_(); break;
+      case 'nlDeletePatient': requireRole_(user, ['admin']); result = nlDeletePatient_(body.data.patient_id); invalidateNlCache_(); break;
       case 'nlUpdateSite':    requireRole_(user, ['admin']); result = nlUpdateSiteRow_(body.data); break;
 
       default:
@@ -170,6 +325,100 @@ function getCurrentUser_(token) {
 
 function requireRole_(user, roles) {
   if (roles.indexOf(user.role) === -1) throw new Error('FORBIDDEN: cần quyền ' + roles.join('/'));
+}
+
+// ===================== PASSWORD AUTH =====================
+
+function hashPassword_(pwd) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, pwd, Utilities.Charset.UTF_8);
+  return bytes.map(function(b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
+}
+
+/** Đảm bảo cột password_hash tồn tại trong sheet Users */
+function ensurePasswordHashCol_() {
+  var sheet = getSheet_(SHEETS.USERS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf('password_hash') !== -1) return;
+  var newCol = sheet.getLastColumn() + 1;
+  sheet.getRange(1, newCol).setValue('password_hash');
+  _sheetCache = {}; // xóa cache để đọc lại
+}
+
+/** Đăng nhập bằng email + mật khẩu — trả về token và thông tin user */
+function login_(data) {
+  var email = String(data.email || '').toLowerCase().trim();
+  var password = String(data.password || '');
+  if (!email || !password) throw new Error('Thiếu email hoặc mật khẩu');
+  ensurePasswordHashCol_();
+  var rows = readSheet_(SHEETS.USERS);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].email).toLowerCase() === email) {
+      var storedHash = String(rows[i].password_hash || '');
+      if (!storedHash) throw new Error('Tài khoản chưa đặt mật khẩu. Liên hệ admin để đặt mật khẩu.');
+      if (hashPassword_(password) !== storedHash) throw new Error('Mật khẩu không đúng');
+      var tok = String(rows[i].token || '');
+      if (!tok) {
+        tok = newToken_();
+        updateRow_(SHEETS.USERS, 'email', { email: rows[i].email, token: tok });
+      }
+      return { token: tok, email: rows[i].email, role: rows[i].role, name: rows[i].name,
+               assigned_studies: String(rows[i].assigned_studies || '') };
+    }
+  }
+  throw new Error('Email không tồn tại trong hệ thống');
+}
+
+/** Đặt mật khẩu: admin có thể đặt cho bất kỳ user; user thường chỉ đặt cho chính mình */
+function setPassword_(user, data) {
+  var targetEmail = String(data.email || user.email).toLowerCase().trim();
+  if (user.role !== 'admin' && targetEmail !== user.email.toLowerCase()) {
+    throw new Error('FORBIDDEN: chỉ được đặt mật khẩu cho chính mình');
+  }
+  if (!data.password || String(data.password).length < 6) {
+    throw new Error('Mật khẩu phải ít nhất 6 ký tự');
+  }
+  ensurePasswordHashCol_();
+  var sheet = getSheet_(SHEETS.USERS);
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var emailCol = headers.indexOf('email');
+  var hashCol  = headers.indexOf('password_hash');
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][emailCol]).toLowerCase() === targetEmail) {
+      sheet.getRange(i + 1, hashCol + 1).setValue(hashPassword_(data.password));
+      return { ok: true, email: targetEmail };
+    }
+  }
+  throw new Error('Không tìm thấy user ' + targetEmail);
+}
+
+/**
+ * Chạy hàm này trong Apps Script Editor để đặt mật khẩu admin.
+ * Sửa biến EMAIL và PASSWORD bên dưới rồi nhấn Run.
+ */
+function setAdminPassword() {
+  var EMAIL = Session.getEffectiveUser().getEmail(); // email của bạn
+  var PASSWORD = 'Admin@115'; // ← ĐỔI MẬT KHẨU NÀY trước khi chạy
+  ensurePasswordHashCol_();
+  var sheet = getSheet_(SHEETS.USERS);
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var emailCol = headers.indexOf('email');
+  var hashCol  = headers.indexOf('password_hash');
+  var tokenCol = headers.indexOf('token');
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][emailCol]).toLowerCase() === EMAIL.toLowerCase()) {
+      sheet.getRange(i + 1, hashCol + 1).setValue(hashPassword_(PASSWORD));
+      Logger.log('✅ Đặt mật khẩu thành công cho: ' + EMAIL);
+      Logger.log('   Mật khẩu: ' + PASSWORD);
+      Logger.log('   Token: ' + values[i][tokenCol]);
+      return;
+    }
+  }
+  // Nếu chưa có user, tạo mới
+  var tok = newToken_();
+  sheet.appendRow([EMAIL, 'admin', 'Admin', 'ALL', tok, hashPassword_(PASSWORD)]);
+  Logger.log('✅ Tạo admin mới: ' + EMAIL + ' | Mật khẩu: ' + PASSWORD + ' | Token: ' + tok);
 }
 
 /** admin ghi mọi NC; investigator chỉ ghi NC được assign (assigned_studies = "ALL" hoặc "NC001,NC002") */
@@ -366,7 +615,7 @@ var _ss = null;
 var _sheetCache = {};
 
 function getSheet_(name) {
-  if (!_ss) _ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!_ss) _ss = getOrCreateSpreadsheet_();
   return _ss.getSheetByName(name);
 }
 
@@ -450,16 +699,20 @@ function deleteRow_(name, idField, idValue) {
   throw new Error('Không tìm thấy ' + idField + '=' + idValue);
 }
 
-/** Trả về danh sách user không kèm token (chỉ cờ has_token) */
+/** Trả về danh sách user không kèm token/password_hash */
 function listUsersPublic_() {
+  ensurePasswordHashCol_();
   return readSheet_(SHEETS.USERS).map(function (u) {
     return { email: u.email, role: u.role, name: u.name,
-             assigned_studies: u.assigned_studies, has_token: u.token !== '' };
+             assigned_studies: u.assigned_studies,
+             has_token: !!u.token,
+             has_password: !!(u.password_hash) };
   });
 }
 
-/** Thêm user mới — trả về token 1 lần để admin gửi cho người dùng */
+/** Thêm user mới — nếu truyền password thì tự hash */
 function addUser_(data) {
+  ensurePasswordHashCol_();
   var existing = readSheet_(SHEETS.USERS);
   for (var i = 0; i < existing.length; i++) {
     if (String(existing[i].email).toLowerCase() === String(data.email).toLowerCase()) {
@@ -467,6 +720,12 @@ function addUser_(data) {
     }
   }
   if (!data.token) data.token = newToken_();
+  if (data.password) {
+    data.password_hash = hashPassword_(data.password);
+    delete data.password;
+  } else {
+    data.password_hash = '';
+  }
   appendObject_(SHEETS.USERS, data);
   return { email: data.email, token: data.token };
 }
@@ -482,7 +741,7 @@ var NL_SHEETS = { SITES: 'NL_Sites', PATIENTS: 'NL_Patients' };
 
 var NL_SCHEMA = {
   NL_Sites: ['site_id','site_name','city','status','contact_name','contact_email','contact_phone','pi_name','target_enrollment'],
-  NL_Patients: ['patient_id','site_id','seq_num','enrollment_date','age','sex','diagnosis','mrs_baseline','mrs_3m','outcome_date','notes','created_at'],
+  NL_Patients: ['patient_id','site_id','seq_num','enrollment_date','sub_investigator','diagnosis','mrs_baseline','mrs_3m','outcome_date','outcome_notes','created_at'],
 };
 
 var NL_SITES_INIT = [
@@ -499,7 +758,7 @@ var NL_SITES_INIT = [
 ];
 
 function nlSetupSheets_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getOrCreateSpreadsheet_();
   Object.keys(NL_SCHEMA).forEach(function(name) {
     var sheet = ss.getSheetByName(name);
     if (!sheet) sheet = ss.insertSheet(name);
@@ -571,8 +830,13 @@ function nlUpdatePatientRow_(data) {
   var rows = nlReadSheet_(NL_SHEETS.PATIENTS);
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i].patient_id) === String(data.patient_id)) {
+      var seqNum = rows[i].seq_num;
+      // Nếu site thay đổi → cập nhật patient_id theo quy ước NEWLINE-{SITE}-{seq}
+      if (data.site_id && data.site_id !== rows[i].site_id) {
+        data.patient_id = 'NEWLINE-' + data.site_id + '-' + padNum_(seqNum, 3);
+      }
       headers.forEach(function(h, c) {
-        if (data[h] !== undefined && h !== 'patient_id' && h !== 'seq_num' && h !== 'created_at') {
+        if (data[h] !== undefined && h !== 'seq_num' && h !== 'created_at') {
           sheet.getRange(i + 2, c + 1).setValue(data[h]);
         }
       });
@@ -609,7 +873,17 @@ function nlUpdateSiteRow_(data) {
   throw new Error('Không tìm thấy site_id=' + data.site_id);
 }
 
+var NL_DASH_CACHE_KEY = 'nlDashboard_v1';
+
+function invalidateNlCache_() {
+  try { CacheService.getScriptCache().removeAll([NL_DASH_CACHE_KEY]); } catch(e) {}
+}
+
 function nlDashboard_() {
+  var sc = CacheService.getScriptCache();
+  var hit = sc.get(NL_DASH_CACHE_KEY);
+  if (hit) { try { return JSON.parse(hit); } catch(e) {} }
+
   var sites = nlListSites_();
   var patients = nlListPatients_();
   var today = new Date();
@@ -637,23 +911,46 @@ function nlDashboard_() {
   });
   alerts.sort(function(a, b) { return a.level === 'red' && b.level !== 'red' ? -1 : b.level === 'red' && a.level !== 'red' ? 1 : 0; });
 
+  // Tổng target và kế hoạch tuyển theo tháng (linear, 12 tháng)
+  var totalTarget = sites.reduce(function(s, site) { return s + (parseInt(site.target_enrollment) || 0); }, 0);
+  var STUDY_MONTHS = 12;
+  var plannedPerMonth = totalTarget > 0 ? totalTarget / STUDY_MONTHS : 0;
+
+  var siteIds = sites.map(function(s) { return s.site_id; });
   var enrollByMonth = [];
-  for (var i = 5; i >= 0; i--) {
-    var ms = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    var me = new Date(today.getFullYear(), today.getMonth() - i + 1, 1);
-    enrollByMonth.push({
-      month: (ms.getMonth() + 1) + '/' + ms.getFullYear(),
-      count: patients.filter(function(p) { return p.enrollment_date && new Date(p.enrollment_date) >= ms && new Date(p.enrollment_date) < me; }).length,
+  var studyStart = new Date(2026, 7, 1); // 01/08/2026
+  var cur = new Date(studyStart.getFullYear(), studyStart.getMonth(), 1);
+  var monthIndex = 0;
+  while (cur <= today) {
+    var me = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    var ms2 = new Date(cur);
+    var entry = { month: (cur.getMonth() + 1) + '/' + cur.getFullYear(), count: 0,
+      planned: Math.round(plannedPerMonth * (monthIndex + 1)), // planned cumulative
+      planned_month: Math.round(plannedPerMonth) };
+    siteIds.forEach(function(sid) {
+      var cnt = patients.filter(function(p) {
+        return p.site_id === sid && p.enrollment_date &&
+               new Date(p.enrollment_date) >= ms2 && new Date(p.enrollment_date) < me;
+      }).length;
+      entry[sid] = cnt;
+      entry.count += cnt;
     });
+    enrollByMonth.push(entry);
+    cur = me;
+    monthIndex++;
   }
 
-  return {
+  var result = {
     sites: Object.values(siteMap),
     patients_total: patients.length,
     completed_total: patients.filter(function(p) { return p.follow_status === 'completed'; }).length,
     overdue_total: patients.filter(function(p) { return p.follow_status === 'overdue'; }).length,
     upcoming_total: patients.filter(function(p) { return p.follow_status === 'upcoming'; }).length,
+    total_target: totalTarget,
+    site_ids: siteIds,
     alerts: alerts,
     enroll_by_month: enrollByMonth,
   };
+  try { sc.put(NL_DASH_CACHE_KEY, JSON.stringify(result), 60); } catch(e) {}
+  return result;
 }

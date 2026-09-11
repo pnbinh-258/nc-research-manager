@@ -3,31 +3,21 @@ import { apiGet, apiPost } from '../api.js';
 import { Modal, Field, ErrorBox, Spinner } from '../ui.jsx';
 
 const ROLES = ['admin', 'investigator', 'readonly'];
-const EMPTY = { email: '', role: 'investigator', name: '', assigned_studies: 'ALL', token: '' };
+const EMPTY = { email: '', role: 'investigator', name: '', assigned_studies: 'ALL', password: '', token: '' };
 
 function UserForm({ onSaved, onClose }) {
   const [form, setForm] = useState({ ...EMPTY });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [newToken, setNewToken] = useState('');
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-
-  const genToken = async () => {
-    try {
-      const res = await apiPost('generateToken', {});
-      setForm((f) => ({ ...f, token: res.token }));
-      setNewToken(res.token);
-    } catch (err) { setError(err.message); }
-  };
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.token) { setError('Chưa sinh token — bấm nút Sinh token'); return; }
+    if (!form.password || form.password.length < 6) { setError('Mật khẩu phải ít nhất 6 ký tự'); return; }
     setBusy(true); setError('');
     try {
       const res = await apiPost('addUser', { ...form });
-      setNewToken(res.token);
-      onSaved(res.token);
+      onSaved(res);
     } catch (err) { setError(err.message); setBusy(false); }
   };
 
@@ -36,8 +26,8 @@ function UserForm({ onSaved, onClose }) {
       <ErrorBox error={error} />
       <form onSubmit={submit}>
         <div className="form-grid">
-          <Field label="Email (Google) *">
-            <input type="email" value={form.email} onChange={set('email')} required />
+          <Field label="Email *">
+            <input type="email" value={form.email} onChange={set('email')} autoComplete="off" required />
           </Field>
           <Field label="Tên hiển thị *">
             <input value={form.name} onChange={set('name')} required />
@@ -50,22 +40,65 @@ function UserForm({ onSaved, onClose }) {
           <Field label="Nghiên cứu được phép (ALL hoặc NC001,NC002)">
             <input value={form.assigned_studies} onChange={set('assigned_studies')} placeholder="ALL" />
           </Field>
+          <Field label="Mật khẩu đăng nhập *">
+            <input type="password" value={form.password} onChange={set('password')}
+              placeholder="Ít nhất 6 ký tự" autoComplete="new-password" required />
+          </Field>
         </div>
-        <div className="row" style={{ marginBottom: 12, alignItems: 'center' }}>
-          <input readOnly value={form.token} placeholder="Token chưa sinh" style={{ flex: 1, fontFamily: 'monospace', fontSize: 13 }} />
-          <button type="button" onClick={genToken}>Sinh token</button>
-        </div>
-        {newToken && (
-          <div className="alert orange" style={{ marginBottom: 12 }}>
-            Token: <b style={{ fontFamily: 'monospace' }}>{newToken}</b><br />
-            <span className="muted">Sao chép và gửi riêng cho người dùng — sẽ không hiển thị lại.</span>
-          </div>
-        )}
-        <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
           <button type="button" onClick={onClose}>Huỷ</button>
-          <button className="primary" disabled={busy}>{busy ? 'Đang lưu…' : 'Lưu người dùng'}</button>
+          <button className="primary" disabled={busy}>{busy ? 'Đang lưu…' : 'Tạo tài khoản'}</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+function SetPasswordModal({ user, onClose }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (password.length < 6) { setError('Mật khẩu phải ít nhất 6 ký tự'); return; }
+    if (password !== confirm) { setError('Mật khẩu xác nhận không khớp'); return; }
+    setBusy(true); setError('');
+    try {
+      await apiPost('setPassword', { email: user.email, password });
+      setDone(true);
+    } catch (err) { setError(err.message); setBusy(false); }
+  };
+
+  return (
+    <Modal title={'Đặt mật khẩu — ' + user.email} onClose={onClose}>
+      {done
+        ? <div className="alert" style={{ color:'var(--green)', border:'1px solid var(--green)', background:'#f0faf0' }}>
+            ✅ Đặt mật khẩu thành công cho <b>{user.email}</b>
+            <div style={{ marginTop: 10, textAlign:'right' }}>
+              <button onClick={onClose}>Đóng</button>
+            </div>
+          </div>
+        : <>
+            <ErrorBox error={error} />
+            <form onSubmit={submit}>
+              <Field label="Mật khẩu mới">
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Ít nhất 6 ký tự" autoComplete="new-password" required />
+              </Field>
+              <Field label="Xác nhận mật khẩu">
+                <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+                  placeholder="Nhập lại mật khẩu" autoComplete="new-password" required />
+              </Field>
+              <div className="row" style={{ justifyContent:'flex-end', marginTop: 8 }}>
+                <button type="button" onClick={onClose}>Huỷ</button>
+                <button className="primary" disabled={busy}>{busy ? 'Đang lưu…' : 'Đặt mật khẩu'}</button>
+              </div>
+            </form>
+          </>
+      }
     </Modal>
   );
 }
@@ -74,13 +107,13 @@ export default function Users() {
   const [users, setUsers] = useState(null);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
-  const [savedToken, setSavedToken] = useState('');
+  const [settingPw, setSettingPw] = useState(null); // user object
 
   const load = () => apiGet('listUsers').then(setUsers).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
 
   const deleteUser = async (email) => {
-    if (!window.confirm('Xoá người dùng ' + email + '? Token của họ sẽ bị vô hiệu ngay lập tức.')) return;
+    if (!window.confirm('Xoá người dùng ' + email + '?')) return;
     try {
       await apiPost('deleteUser', { email });
       load();
@@ -94,19 +127,16 @@ export default function Users() {
     <div>
       <div className="row between" style={{ marginBottom: 14 }}>
         <h1 style={{ marginBottom: 0 }}>Quản lý người dùng</h1>
-        <button className="primary" onClick={() => { setSavedToken(''); setAdding(true); }}>+ Thêm người dùng</button>
+        <button className="primary" onClick={() => setAdding(true)}>+ Thêm người dùng</button>
       </div>
-
-      {savedToken && (
-        <div className="alert orange" style={{ marginBottom: 14 }}>
-          Token mới: <b style={{ fontFamily: 'monospace' }}>{savedToken}</b> — gửi riêng cho người dùng, đừng để lộ!
-        </div>
-      )}
 
       <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
         <table className="data">
           <thead>
-            <tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Nghiên cứu</th><th>Token</th><th></th></tr>
+            <tr>
+              <th>Email</th><th>Tên</th><th>Vai trò</th><th>Nghiên cứu</th>
+              <th>Mật khẩu</th><th></th>
+            </tr>
           </thead>
           <tbody>
             {users.map((u) => (
@@ -115,8 +145,13 @@ export default function Users() {
                 <td>{u.name}</td>
                 <td><span className={'badge ' + u.role}>{u.role}</span></td>
                 <td><span style={{ fontFamily: 'monospace', fontSize: 12 }}>{u.assigned_studies}</span></td>
-                <td>{u.has_token ? <span style={{ color: 'var(--green)' }}>✓ Đã cấp</span> : <span className="muted">—</span>}</td>
                 <td>
+                  {u.has_password
+                    ? <span style={{ color: 'var(--green)' }}>✓ Đã đặt</span>
+                    : <span style={{ color: '#e67e22' }}>⚠ Chưa đặt</span>}
+                </td>
+                <td style={{ display:'flex', gap:6 }}>
+                  <button className="small" onClick={() => setSettingPw(u)}>Đặt mật khẩu</button>
                   <button className="small danger" onClick={() => deleteUser(u.email)}>Xoá</button>
                 </td>
               </tr>
@@ -127,13 +162,20 @@ export default function Users() {
       </div>
 
       <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
-        Thu hồi quyền truy cập: xoá người dùng. Token bị xoá có hiệu lực ngay — lần sau gọi API sẽ nhận UNAUTHORIZED.
+        Mỗi người dùng đăng nhập bằng email + mật khẩu riêng. Admin đặt mật khẩu lần đầu, người dùng có thể đổi sau.
       </p>
 
       {adding && (
         <UserForm
           onClose={() => setAdding(false)}
-          onSaved={(token) => { setAdding(false); setSavedToken(token); load(); }}
+          onSaved={() => { setAdding(false); load(); }}
+        />
+      )}
+
+      {settingPw && (
+        <SetPasswordModal
+          user={settingPw}
+          onClose={() => { setSettingPw(null); load(); }}
         />
       )}
     </div>

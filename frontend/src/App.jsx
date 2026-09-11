@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { apiGet, getConfig, saveConfig, clearConfig } from './api.js';
+import { apiGet, apiLogin, getConfig, saveConfig, clearConfig } from './api.js';
 import { ErrorBox, Field } from './ui.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Studies from './pages/Studies.jsx';
@@ -23,19 +23,24 @@ function useHashRoute() {
 
 function LoginScreen({ onLogin }) {
   const cfg = getConfig();
-  const [apiUrl, setApiUrl] = useState(cfg.apiUrl);
-  const [token, setToken] = useState(cfg.token);
+  const [email, setEmail] = useState(cfg.lastEmail || '');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // không pre-fill URL demo từ session cũ
+  const [apiUrl, setApiUrl] = useState(cfg.apiUrl && cfg.apiUrl !== 'demo' ? cfg.apiUrl : '');
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const doLogin = async (loginEmail, loginPassword, loginUrl) => {
     setBusy(true);
     setError('');
     try {
-      saveConfig(apiUrl, token);
-      const user = await apiGet('whoami');
-      onLogin(user);
+      if (loginUrl) saveConfig(loginUrl, cfg.token || '');
+      const userData = await apiLogin(loginEmail, loginPassword);
+      // lưu token nhận được, email để pre-fill lần sau
+      saveConfig(getConfig().apiUrl, userData.token);
+      localStorage.setItem('nc_last_email', loginEmail);
+      onLogin(userData);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -43,27 +48,60 @@ function LoginScreen({ onLogin }) {
     }
   };
 
+  const submit = (e) => {
+    e.preventDefault();
+    doLogin(email, password, apiUrl || null);
+  };
+
+  const demoLogin = () => {
+    saveConfig('demo', 'demo');
+    doLogin('demo', 'demo', 'demo');
+  };
+
   return (
-    <div style={{ maxWidth: 460, margin: '10vh auto', padding: 16 }}>
+    <div style={{ maxWidth: 420, margin: '10vh auto', padding: 16 }}>
       <div className="card">
-        <h1 style={{ fontSize: 18, marginBottom: 6 }}>Quản lý Nghiên cứu</h1>
-        <p className="muted" style={{ marginBottom: 18 }}>Khoa Bệnh lý mạch máu não — đăng nhập bằng token cá nhân</p>
+        <div style={{ textAlign:'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 36, marginBottom: 6 }}>🏥</div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Quản lý Nghiên cứu</h1>
+          <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>Khoa Bệnh lý mạch máu não — BV Nhân dân 115</p>
+        </div>
+
         <ErrorBox error={error} />
+
         <form onSubmit={submit}>
-          <Field label="API URL (Apps Script /exec)">
-            <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)}
-              placeholder="https://script.google.com/macros/s/…/exec" required />
+          <Field label="Email">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="your@email.com" autoComplete="email" required />
           </Field>
-          <Field label="Token cá nhân (PI cấp, trong sheet Users)">
-            <input value={token} onChange={(e) => setToken(e.target.value)} required />
+          <Field label="Mật khẩu">
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••" autoComplete="current-password" required />
           </Field>
-          <button className="primary" disabled={busy} style={{ width: '100%' }}>
-            {busy ? 'Đang kiểm tra…' : 'Đăng nhập'}
+
+          {showAdvanced && (
+            <Field label="API URL (tuỳ chỉnh)">
+              <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)}
+                placeholder="Để trống để dùng URL mặc định" />
+            </Field>
+          )}
+
+          <button type="submit" className="primary" disabled={busy} style={{ width: '100%', marginTop: 4 }}>
+            {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
           </button>
         </form>
-        <p className="muted" style={{ marginTop: 12 }}>
-          Chưa có backend? Nhập <b>demo</b> vào cả hai ô để xem app với dữ liệu mẫu.
-        </p>
+
+        <div style={{ marginTop: 14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <button type="button" onClick={demoLogin}
+            style={{ background:'none', border:'1px solid var(--border)', borderRadius:6,
+              padding:'4px 12px', fontSize:12, cursor:'pointer', color:'var(--muted)' }}>
+            Dùng thử demo
+          </button>
+          <button type="button" onClick={() => setShowAdvanced(v => !v)}
+            style={{ background:'none', border:'none', fontSize:11, cursor:'pointer', color:'var(--muted)' }}>
+            {showAdvanced ? 'Ẩn tuỳ chỉnh' : 'Tuỳ chỉnh API URL'}
+          </button>
+        </div>
       </div>
     </div>
   );

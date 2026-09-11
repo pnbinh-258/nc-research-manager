@@ -9,6 +9,7 @@ export function getConfig() {
   return {
     apiUrl: localStorage.getItem('nc_api_url') || (typeof window !== 'undefined' && window.NC_API_URL) || DEFAULT_API_URL,
     token: localStorage.getItem('nc_token') || '',
+    lastEmail: localStorage.getItem('nc_last_email') || '',
   };
 }
 
@@ -45,6 +46,24 @@ export async function apiGet(action, params = {}) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
   });
   const res = await fetch(url.toString());
+  return parseResponse(res);
+}
+
+export async function apiLogin(email, password) {
+  // demo mode chỉ khi cả email lẫn password đều là 'demo'
+  if (email === 'demo' && password === 'demo') {
+    saveConfig('demo', 'demo');
+    return demoCall('login', {}, { email, password });
+  }
+  // real login: luôn dùng URL thật, bỏ qua nc_api_url = 'demo' từ session cũ
+  const { apiUrl } = getConfig();
+  const url = (!apiUrl || apiUrl === 'demo') ? DEFAULT_API_URL : apiUrl;
+  saveConfig(url, getConfig().token); // đảm bảo URL thật được lưu lại
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'login', data: { email, password } }),
+  });
   return parseResponse(res);
 }
 

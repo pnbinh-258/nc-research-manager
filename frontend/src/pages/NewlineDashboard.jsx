@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 
+function fmtVN(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return (d && m && y) ? `${d}/${m}/${y}` : iso;
+}
+
 const SITES_META = [
   { site_id: 'ND115', site_name: 'Nhân Dân 115',      city: 'TP.HCM'    },
   { site_id: 'TNH',   site_name: 'Thống Nhất',         city: 'TP.HCM'    },
@@ -30,27 +36,93 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function SiteCard({ site, onClick }) {
+function SiteEditModal({ site, onClose, onSaved }) {
+  const meta = SITES_META.find(m => m.site_id === site.site_id) || {};
+  const [status, setStatus] = useState(site.status || 'Chưa mở');
+  const [target, setTarget] = useState(site.target_enrollment || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    setBusy(true); setError('');
+    try {
+      await apiPost('nlUpdateSite', { site_id: site.site_id, status, target_enrollment: target });
+      onSaved();
+    } catch (e) { setError(e.message); setBusy(false); }
+  };
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1000,
+      display:'flex', alignItems:'center', justifyContent:'center' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background:'var(--surface)', borderRadius:10, padding:24, width:320,
+        boxShadow:'0 8px 32px rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
+        <div style={{ fontWeight:700, fontSize:15, marginBottom:16 }}>
+          Chỉnh site — {meta.site_name || site.site_id}
+        </div>
+
+        {error && <div style={{ color:'#d32f2f', fontSize:13, marginBottom:10 }}>⚠ {error}</div>}
+
+        <div style={{ marginBottom:14 }}>
+          <label style={{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:5 }}>Trạng thái</label>
+          <select value={status} onChange={e => setStatus(e.target.value)}
+            style={{ width:'100%', padding:'7px 10px', borderRadius:6, border:'1.5px solid var(--border)',
+              background:'var(--surface)', color:'var(--text)', fontSize:14 }}>
+            <option value="Recruiting">Recruiting (đang tuyển)</option>
+            <option value="Chưa mở">Chưa mở</option>
+            <option value="Completed">Completed</option>
+            <option value="Suspended">Suspended</option>
+          </select>
+        </div>
+
+        <div style={{ marginBottom:20 }}>
+          <label style={{ fontSize:12, color:'var(--muted)', display:'block', marginBottom:5 }}>Mục tiêu thu tuyển (BN)</label>
+          <input type="number" value={target} onChange={e => setTarget(e.target.value)}
+            placeholder="VD: 30" min="0"
+            style={{ width:'100%', padding:'7px 10px', borderRadius:6, border:'1.5px solid var(--border)',
+              background:'var(--surface)', color:'var(--text)', fontSize:14, boxSizing:'border-box' }} />
+        </div>
+
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+          <button onClick={onClose}
+            style={{ padding:'7px 16px', borderRadius:6, border:'1px solid var(--border)',
+              background:'var(--surface)', cursor:'pointer', fontSize:13 }}>Huỷ</button>
+          <button onClick={save} disabled={busy}
+            style={{ padding:'7px 16px', borderRadius:6, border:'none',
+              background:'#1a73e8', color:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>
+            {busy ? 'Đang lưu…' : 'Lưu'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SiteCard({ site, onClick, onEdit, canEdit }) {
   const meta = SITES_META.find(m => m.site_id === site.site_id) || {};
   const color = SITE_COLOR[site.site_id] || '#888';
-  const target = Number(site.target_enrollment) || 0;
-  const pct = target > 0 ? Math.min(100, Math.round(site.enrolled / target * 100)) : null;
   const isRecruiting = site.status === 'Recruiting';
 
   return (
-    <div className="nl-site-card" style={{ borderLeft: `4px solid ${color}` }} onClick={onClick}>
-      <div className="nl-site-header">
+    <div className="nl-site-card" style={{ borderLeft: `4px solid ${color}`, position:'relative' }}>
+      {canEdit && (
+        <button onClick={e => { e.stopPropagation(); onEdit(); }}
+          title="Chỉnh trạng thái site"
+          style={{ position:'absolute', top:8, right:8, background:'none', border:'none',
+            cursor:'pointer', fontSize:15, opacity:0.5, padding:2, lineHeight:1 }}>✏️</button>
+      )}
+      <div className="nl-site-header" onClick={onClick} style={{ cursor:'pointer' }}>
         <div>
           <div className="nl-site-name">{meta.site_name || site.site_id}</div>
           <div className="nl-site-city">{meta.city}</div>
         </div>
         <div className={`nl-site-badge ${isRecruiting ? 'recruiting' : 'not-recruiting'}`}>
-          {isRecruiting ? 'Recruiting' : 'Chưa mở'}
+          {isRecruiting ? 'Recruiting' : (site.status || 'Chưa mở')}
         </div>
       </div>
-      <div className="nl-site-stats">
-        <span className="nl-enrolled-num">{site.enrolled}</span>
-        <span className="nl-enrolled-label"> BN</span>
+      <div className="nl-site-stats" onClick={onClick} style={{ cursor:'pointer' }}>
+        <span className="nl-enrolled-num" style={{ color }}>{site.enrolled}</span>
+        <span className="nl-enrolled-label"> BN thu tuyển</span>
         {site.overdue_outcome > 0 && (
           <span className="nl-badge-red" title="Quá hạn đánh giá">🔴 {site.overdue_outcome}</span>
         )}
@@ -58,32 +130,280 @@ function SiteCard({ site, onClick }) {
           <span className="nl-badge-orange" title="Sắp đến hạn">🟠 {site.upcoming_outcome}</span>
         )}
       </div>
-      {pct !== null && (
-        <div className="nl-progress-bar">
-          <div className="nl-progress-fill" style={{ width: pct + '%', background: color }} />
+      {site.target_enrollment > 0 && (
+        <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>
+          Mục tiêu: {site.target_enrollment} BN
+          {site.enrolled > 0 && (
+            <span style={{ marginLeft:6, color: site.enrolled >= site.target_enrollment ? '#188038' : color }}>
+              ({Math.round(site.enrolled / site.target_enrollment * 100)}%)
+            </span>
+          )}
         </div>
       )}
-      {target > 0 && (
-        <div className="nl-progress-label">{site.enrolled}/{target} ({pct}%)</div>
+      {site.completed_outcome > 0 && (
+        <div className="nl-progress-label" style={{ color:'#188038' }}>
+          ✓ {site.completed_outcome} đã có kết cục 3T
+        </div>
       )}
     </div>
   );
 }
 
-function EnrollChart({ data }) {
-  const max = Math.max(...data.map(m => m.count), 1);
+const MONTHS_VI = ['','Th.1','Th.2','Th.3','Th.4','Th.5','Th.6','Th.7','Th.8','Th.9','Th.10','Th.11','Th.12'];
+
+function SvgChart({ enriched, siteIds, mode, totalTarget }) {
+  const [hovered, setHovered] = useState(null);
+  const W = 700, H = 240, PAD = { t: 36, r: 28, b: 44, l: 44 };
+  const innerW = W - PAD.l - PAD.r, innerH = H - PAD.t - PAD.b;
+  const n = enriched.length;
+  const slot = innerW / n;
+  const barW = Math.max(20, Math.floor(slot * 0.6));
+  const cx_ = i => PAD.l + (i + 0.5) * slot;
+  const bx  = i => cx_(i) - barW / 2;
+
+  // Tính cumulative actual
+  let cumAct = 0;
+  const withCum = enriched.map(m => { cumAct += m.count; return { ...m, cumAct }; });
+
+  const maxBar = Math.max(...enriched.map(m => m.count), 1);
+  const maxCum = Math.max(withCum[withCum.length - 1]?.cumAct || 1, totalTarget || 1, 1);
+
+  const byBar = v => PAD.t + innerH - Math.round((v / maxBar) * innerH);
+  const byCum = v => PAD.t + innerH - Math.round((v / maxCum) * innerH);
+  const yTicks = [0, 0.25, 0.5, 0.75, 1];
+
   return (
-    <div className="css-chart" style={{ height: 100 }}>
-      {data.map((m, i) => {
-        const h = Math.round((m.count / max) * 72);
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', display:'block', overflow:'visible' }}>
+      {/* Gridlines */}
+      {yTicks.map(f => {
+        const y = PAD.t + innerH * (1 - f);
         return (
-          <div key={i} className="css-bar-col" title={`${m.month}: ${m.count} BN`}>
-            <div className="css-bar-count">{m.count > 0 ? m.count : ''}</div>
-            <div className="css-bar-fill" style={{ height: Math.max(h, m.count > 0 ? 4 : 0) + 'px', background: '#1a73e8' }} />
-            <div className="css-bar-label">{m.month.split('/')[0]}</div>
+          <g key={f}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y} y2={y}
+              stroke={f === 0 ? 'var(--text)' : 'var(--border)'}
+              strokeWidth={f === 0 ? 1.5 : 1} strokeDasharray={f > 0 ? '4,3' : ''} />
+            {f > 0 && <text x={PAD.l - 6} y={y + 4} fontSize="10" fill="var(--muted)" textAnchor="end">{Math.round(maxBar * f)}</text>}
+          </g>
+        );
+      })}
+
+      {/* Bars */}
+      {enriched.map((m, i) => {
+        const [mo, yr] = m.month.split('/');
+        const isHov = hovered === i;
+        let yOff = PAD.t + innerH;
+
+        return (
+          <g key={i} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} style={{ cursor:'pointer' }}>
+            {isHov && <rect x={cx_(i) - slot/2} y={PAD.t} width={slot} height={innerH} fill="#888" opacity="0.06" rx="2"/>}
+
+            {/* Stacked segments by site */}
+            {mode === 'stacked'
+              ? siteIds.map(sid => {
+                  const cnt = m[sid] || 0;
+                  if (cnt === 0) return null;
+                  const segH = Math.round((cnt / maxBar) * innerH);
+                  yOff -= segH;
+                  return <rect key={sid} x={bx(i)} y={yOff} width={barW} height={segH}
+                    fill={SITE_COLOR[sid] || '#888'} rx="1"
+                    opacity={hovered !== null && !isHov ? 0.35 : 0.9} />;
+                })
+              : (() => {
+                  const barH = Math.max(m.count > 0 ? 3 : 0, Math.round((m.count / maxBar) * innerH));
+                  return <rect x={bx(i)} y={byBar(m.count)} width={barW} height={barH}
+                    fill={isHov ? '#0d5bdb' : '#1a73e8'} rx="3"
+                    opacity={hovered !== null && !isHov ? 0.35 : 1} />;
+                })()
+            }
+
+            {/* Count label */}
+            {m.count > 0 && (
+              <text x={cx_(i)} y={(mode === 'stacked' ? yOff : byBar(m.count)) - 5}
+                fontSize="12" fontWeight="700" textAnchor="middle"
+                fill={isHov ? '#1a73e8' : 'var(--text)'}>
+                {m.count}
+              </text>
+            )}
+
+            {/* X labels */}
+            <text x={cx_(i)} y={H - 22} fontSize="11" textAnchor="middle" fill="var(--muted)">{MONTHS_VI[+mo] || mo}</text>
+            <text x={cx_(i)} y={H - 8}  fontSize="9"  textAnchor="middle" fill="var(--muted)" opacity="0.6">{yr}</text>
+
+            {/* Tooltip */}
+            {isHov && (() => {
+              const ttW = 140, ttH = mode === 'stacked' ? 14 + siteIds.filter(s => m[s] > 0).length * 14 + 14 : 46;
+              const ttX = Math.min(Math.max(cx_(i) - ttW/2, PAD.l), W - PAD.r - ttW);
+              const ttY = PAD.t - ttH - 8;
+              const activeSites = siteIds.filter(s => m[s] > 0);
+              return (
+                <g>
+                  <rect x={ttX} y={ttY} width={ttW} height={ttH} rx="6"
+                    fill="var(--surface)" stroke="var(--border)" strokeWidth="1.5"
+                    style={{ filter:'drop-shadow(0 2px 8px rgba(0,0,0,.15))' }} />
+                  <text x={ttX + ttW/2} y={ttY + 14} fontSize="11" fontWeight="700" textAnchor="middle" fill="var(--text)">{m.month} · +{m.count} BN</text>
+                  {mode === 'stacked' ? activeSites.map((sid, j) => (
+                    <g key={sid}>
+                      <rect x={ttX + 8} y={ttY + 20 + j*14} width={8} height={8} fill={SITE_COLOR[sid]} rx="1"/>
+                      <text x={ttX + 20} y={ttY + 28 + j*14} fontSize="10" fill="var(--text)">{sid}: {m[sid]}</text>
+                    </g>
+                  )) : (
+                    <text x={ttX + ttW/2} y={ttY + 32} fontSize="10" textAnchor="middle" fill="var(--muted)">Lũy kế: {withCum[i].cumAct} BN</text>
+                  )}
+                </g>
+              );
+            })()}
+          </g>
+        );
+      })}
+
+      {/* Cumulative actual line + area */}
+      {withCum.length > 1 && (() => {
+        const pts = withCum.map((m, i) => `${cx_(i)},${byCum(m.cumAct)}`);
+        const area = [`${cx_(0)},${PAD.t + innerH}`, ...pts, `${cx_(n-1)},${PAD.t + innerH}`].join(' ');
+        return (
+          <g>
+            <polygon points={area} fill="#f39c12" opacity="0.07"/>
+            <polyline points={pts.join(' ')} fill="none" stroke="#f39c12" strokeWidth="2.5" strokeLinejoin="round"/>
+            {withCum.map((m, i) => <circle key={i} cx={cx_(i)} cy={byCum(m.cumAct)} r={hovered === i ? 6 : 3.5} fill="#f39c12" stroke="white" strokeWidth="2"/>)}
+          </g>
+        );
+      })()}
+
+      {/* Planned cumulative line (nếu có target) */}
+      {totalTarget > 0 && (() => {
+        const pts = enriched.map((m, i) => `${cx_(i)},${byCum(m.planned || 0)}`).join(' ');
+        return (
+          <g>
+            <polyline points={pts} fill="none" stroke="#d32f2f" strokeWidth="1.5" strokeDasharray="8,4" opacity="0.7"/>
+            {enriched.map((m, i) => (
+              <circle key={i} cx={cx_(i)} cy={byCum(m.planned || 0)} r="2.5" fill="#d32f2f" opacity="0.7"/>
+            ))}
+          </g>
+        );
+      })()}
+
+      {/* Labels cuối đường */}
+      {withCum.length > 0 && (() => {
+        const last = withCum[n-1];
+        const lx = cx_(n-1), ly = byCum(last.cumAct);
+        return (
+          <g>
+            <rect x={lx + 6} y={ly - 11} width={42} height={20} rx="4" fill="#f39c12"/>
+            <text x={lx + 27} y={ly + 4} fontSize="11" fontWeight="800" textAnchor="middle" fill="white">{last.cumAct}</text>
+          </g>
+        );
+      })()}
+      {totalTarget > 0 && enriched.length > 0 && (() => {
+        const last = enriched[n-1];
+        const lx = cx_(n-1), ly = byCum(last.planned || 0);
+        return (
+          <g>
+            <rect x={lx + 6} y={ly - 11} width={42} height={20} rx="4" fill="#d32f2f" opacity="0.85"/>
+            <text x={lx + 27} y={ly + 4} fontSize="11" fontWeight="700" textAnchor="middle" fill="white">{last.planned}</text>
+          </g>
+        );
+      })()}
+    </svg>
+  );
+}
+
+function SiteSparklines({ data, siteIds }) {
+  const W = 120, H = 50, PAD = { t: 4, r: 4, b: 16, l: 4 };
+  const innerW = W - PAD.l - PAD.r, innerH = H - PAD.t - PAD.b;
+  const n = data.length;
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px, 1fr))', gap:8, marginTop:8 }}>
+      {siteIds.map(sid => {
+        const counts = data.map(m => m[sid] || 0);
+        const max = Math.max(...counts, 1);
+        let cum = 0; const cums = counts.map(c => { cum += c; return cum; });
+        const total = cums[cums.length - 1] || 0;
+        const color = SITE_COLOR[sid] || '#888';
+        const slot = innerW / n;
+        return (
+          <div key={sid} style={{ background:'var(--surface)', border:'1px solid var(--border)',
+            borderLeft:`3px solid ${color}`, borderRadius:6, padding:'8px 10px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>
+              <span style={{ fontSize:11, fontWeight:700, color }}>{sid}</span>
+              <span style={{ fontSize:13, fontWeight:800, color }}>{total}</span>
+            </div>
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', display:'block' }}>
+              {counts.map((c, i) => {
+                const bh = Math.max(c > 0 ? 2 : 0, Math.round((c / max) * innerH));
+                return <rect key={i} x={PAD.l + i * slot + 1} y={PAD.t + innerH - bh}
+                  width={Math.max(1, slot - 2)} height={bh} fill={color} rx="1" opacity="0.85"/>;
+              })}
+              <text x={W/2} y={H - 2} fontSize="8" textAnchor="middle" fill="var(--muted)">
+                {data.map(m => m.month.split('/')[0]).join('  ')}
+              </text>
+            </svg>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function EnrollChart({ data, sites, siteIds, totalTarget }) {
+  const [mode, setMode] = useState('combined'); // 'combined' | 'stacked' | 'persite'
+  if (!data || data.length === 0) return <div className="empty">Chưa có dữ liệu tuyển bệnh</div>;
+
+  let cum = 0;
+  const enriched = data.map(m => { cum += m.count; return { ...m, cum }; });
+  const ids = siteIds || [];
+
+  const tabs = [
+    { k:'combined', label:'Tổng hợp' },
+    { k:'stacked',  label:'Theo site (xếp chồng)' },
+    { k:'persite',  label:'Từng site' },
+  ];
+
+  return (
+    <div>
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:6, marginBottom:12 }}>
+        {tabs.map(t => (
+          <button key={t.k} onClick={() => setMode(t.k)} style={{
+            padding:'4px 12px', borderRadius:16, fontSize:12, fontWeight:600, cursor:'pointer',
+            border:'1.5px solid ' + (mode === t.k ? '#1a73e8' : 'var(--border)'),
+            background: mode === t.k ? '#1a73e8' : 'var(--surface)',
+            color: mode === t.k ? '#fff' : 'var(--text)', transition:'all .15s',
+          }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginBottom:8, fontSize:11, color:'var(--muted)' }}>
+        {mode === 'stacked'
+          ? ids.map(sid => (
+              <span key={sid} style={{ display:'flex', alignItems:'center', gap:4 }}>
+                <span style={{ width:10, height:10, background: SITE_COLOR[sid], borderRadius:2, display:'inline-block' }}/>
+                {sid}
+              </span>
+            ))
+          : <>
+              <span style={{ display:'flex', alignItems:'center', gap:4 }}>
+                <span style={{ width:12, height:12, background:'#1a73e8', borderRadius:2, display:'inline-block' }}/> BN mới/tháng
+              </span>
+              <span style={{ display:'flex', alignItems:'center', gap:4 }}>
+                <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#f39c12" strokeWidth="2.5"/><circle cx="11" cy="5" r="3" fill="#f39c12"/></svg>
+                Lũy kế thực tế
+              </span>
+              {totalTarget > 0 && (
+                <span style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#d32f2f" strokeWidth="1.5" strokeDasharray="6,3"/></svg>
+                  Lũy kế kế hoạch
+                </span>
+              )}
+            </>
+        }
+      </div>
+
+      {mode === 'persite'
+        ? <SiteSparklines data={data} siteIds={ids} />
+        : <SvgChart enriched={enriched} siteIds={ids} mode={mode} totalTarget={totalTarget} />
+      }
     </div>
   );
 }
@@ -93,6 +413,8 @@ export default function NewlineDashboard({ user }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [setupBusy, setSetupBusy] = useState(false);
+  const [editingSite, setEditingSite] = useState(null);
+  const isAdmin = user && (user.role === 'admin');
 
   const load = async () => {
     setLoading(true); setErr('');
@@ -121,7 +443,23 @@ export default function NewlineDashboard({ user }) {
     }
   };
 
-  if (loading) return <div className="empty">Đang tải dữ liệu NEWLINE…</div>;
+  if (loading) return (
+    <div style={{ padding: 24 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20 }}>
+        <div className="skeleton" style={{ width:160, height:28, borderRadius:6 }} />
+        <div className="skeleton" style={{ width:80, height:20, borderRadius:4 }} />
+      </div>
+      <div className="stats-row" style={{ marginBottom:24 }}>
+        {[1,2,3,4,5].map(i => <div key={i} className="stat-card skeleton" style={{ height:72 }} />)}
+      </div>
+      <div className="nl-site-grid">
+        {[1,2,3,4,5,6,7,8,9,10].map(i => <div key={i} className="skeleton" style={{ height:90, borderRadius:8 }} />)}
+      </div>
+      <div style={{ marginTop:12, color:'var(--muted)', fontSize:12, textAlign:'center' }}>
+        Đang kết nối Google Sheets… (lần đầu có thể mất 5–10 giây)
+      </div>
+    </div>
+  );
 
   if (err) return (
     <div style={{ padding: 24 }}>
@@ -137,7 +475,8 @@ export default function NewlineDashboard({ user }) {
   );
 
   const { sites = [], patients_total = 0, completed_total = 0, overdue_total = 0,
-          upcoming_total = 0, alerts = [], enroll_by_month = [] } = data || {};
+          upcoming_total = 0, alerts = [], enroll_by_month = [],
+          site_ids = [], total_target = 0 } = data || {};
 
   const redAlerts = alerts.filter(a => a.level === 'red');
   const orangeAlerts = alerts.filter(a => a.level === 'orange');
@@ -168,7 +507,7 @@ export default function NewlineDashboard({ user }) {
               <b>🔴 Quá hạn đánh giá ({redAlerts.length} BN)</b>
               {redAlerts.map((a, i) => (
                 <div key={i} className="nl-alert-item">
-                  <a href="#/newline/patients">{a.patient_id}</a> — hạn {a.due_date}
+                  <a href="#/newline/patients">{a.patient_id}</a> — hạn {fmtVN(a.due_date)}
                 </div>
               ))}
             </div>
@@ -178,7 +517,7 @@ export default function NewlineDashboard({ user }) {
               <b>🟠 Sắp đến hạn ({orangeAlerts.length} BN trong 7 ngày tới)</b>
               {orangeAlerts.map((a, i) => (
                 <div key={i} className="nl-alert-item">
-                  <a href="#/newline/patients">{a.patient_id}</a> — hạn {a.due_date}
+                  <a href="#/newline/patients">{a.patient_id}</a> — hạn {fmtVN(a.due_date)}
                 </div>
               ))}
             </div>
@@ -207,16 +546,45 @@ export default function NewlineDashboard({ user }) {
             const s = sites.find(x => x.site_id === meta.site_id) || { ...meta, enrolled: 0, completed_outcome: 0, overdue_outcome: 0, upcoming_outcome: 0 };
             return (
               <SiteCard key={meta.site_id} site={s}
+                canEdit={isAdmin}
+                onEdit={() => setEditingSite(s)}
                 onClick={() => { window.location.hash = '#/newline/patients?site=' + meta.site_id; }} />
             );
           })}
         </div>
+
+        {editingSite && (
+          <SiteEditModal
+            site={editingSite}
+            onClose={() => setEditingSite(null)}
+            onSaved={() => { setEditingSite(null); load(); }}
+          />
+        )}
       </div>
 
       {/* Enrollment chart */}
       <div className="card" style={{ marginBottom: 0 }}>
-        <div style={{ fontWeight: 600, marginBottom: 12 }}>Tốc độ tuyển bệnh (6 tháng gần nhất)</div>
-        <EnrollChart data={enroll_by_month} />
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+          <div style={{ fontWeight:700, fontSize:15 }}>Tốc độ tuyển bệnh — NEWLINE (từ 08/2026)</div>
+          {enroll_by_month.length > 0 && (() => {
+            const recent = enroll_by_month.slice(-2);
+            const avg = patients_total / Math.max(enroll_by_month.length, 1);
+            return (
+              <div style={{ display:'flex', gap:16, fontSize:11, color:'var(--muted)' }}>
+                <span>TB: <b style={{ color:'var(--text)' }}>{avg.toFixed(1)} BN/tháng</b></span>
+                {recent.length >= 2 && recent[1].count > recent[0].count && (
+                  <span style={{ color:'#188038' }}>↑ Tăng tốc</span>
+                )}
+                {recent.length >= 2 && recent[1].count < recent[0].count && (
+                  <span style={{ color:'#d32f2f' }}>↓ Chậm lại</span>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+        <EnrollChart data={enroll_by_month} sites={sites}
+          siteIds={site_ids.length > 0 ? site_ids : sites.map(s => s.site_id)}
+          totalTarget={total_target} />
       </div>
     </div>
   );

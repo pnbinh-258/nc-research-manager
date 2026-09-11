@@ -144,6 +144,18 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .muted { color: var(--muted); font-size: 12.5px; }
 .error-box { background: var(--red-bg); color: var(--red); padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; font-size: 13.5px; }
 .empty { color: var(--muted); padding: 24px; text-align: center; font-size: 13.5px; }
+
+/* Skeleton loading */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--border) 25%, var(--bg) 50%, var(--border) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px;
+}
 a.link { color: var(--blue); text-decoration: none; }
 a.link:hover { text-decoration: underline; }
 
@@ -326,22 +338,23 @@ a.link:hover { text-decoration: underline; }
   background: var(--surface);
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  padding: 14px;
+  border-left-width: 5px;
+  padding: 14px 14px 12px;
   cursor: pointer;
-  transition: box-shadow 0.15s;
+  transition: box-shadow 0.15s, transform 0.1s;
 }
-.nl-site-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-.nl-site-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-.nl-site-name { font-weight: 600; font-size: 13px; }
-.nl-site-city { font-size: 11px; color: var(--muted); }
+.nl-site-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.12); transform: translateY(-1px); }
+.nl-site-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.nl-site-name { font-weight: 700; font-size: 13px; }
+.nl-site-city { font-size: 11px; color: var(--muted); margin-top: 1px; }
 .nl-site-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
 .nl-site-badge.recruiting { background: var(--green-bg); color: var(--green); }
 .nl-site-badge.not-recruiting { background: #f0f0f0; color: #888; }
-.nl-site-stats { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.nl-enrolled-num { font-size: 24px; font-weight: 700; color: var(--text); }
+.nl-site-stats { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+.nl-enrolled-num { font-size: 36px; font-weight: 800; line-height: 1; }
 .nl-enrolled-label { font-size: 12px; color: var(--muted); }
-.nl-badge-red   { font-size: 11px; background: var(--red-bg);    color: var(--red);    padding: 1px 5px; border-radius: 8px; }
-.nl-badge-orange{ font-size: 11px; background: var(--orange-bg); color: var(--orange); padding: 1px 5px; border-radius: 8px; }
+.nl-badge-red   { font-size: 11px; font-weight: 600; background: var(--red-bg);    color: var(--red);    padding: 2px 7px; border-radius: 10px; }
+.nl-badge-orange{ font-size: 11px; font-weight: 600; background: var(--orange-bg); color: var(--orange); padding: 2px 7px; border-radius: 10px; }
 
 /* Site progress */
 .nl-progress-bar { height: 5px; background: #e8ebef; border-radius: 4px; overflow: hidden; margin-bottom: 3px; }
@@ -350,13 +363,13 @@ a.link:hover { text-decoration: underline; }
 
 /* Site tabs (patient page) */
 .nl-site-tab {
-  padding: 4px 10px; border-radius: 16px; font-size: 12px; font-weight: 500;
-  border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text);
-  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  border: 2px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text);
+  display: inline-flex; align-items: center; gap: 5px; transition: all 0.15s;
 }
-.nl-site-tab.active { background: #0f5132; color: #fff; border-color: #0f5132; }
-.nl-site-tab:hover:not(.active) { background: var(--bg); }
-.nl-tab-count { background: rgba(255,255,255,.3); border-radius: 8px; padding: 0 5px; font-size: 10px; }
+.nl-site-tab.active { color: #fff; border-color: transparent; }
+.nl-site-tab:hover:not(.active) { background: var(--bg); border-color: #aaa; }
+.nl-tab-count { background: rgba(255,255,255,.35); border-radius: 10px; padding: 0 6px; font-size: 11px; font-weight: 700; }
 .nl-site-tab:not(.active) .nl-tab-count { background: var(--border); color: var(--muted); }
 
 /* Filter chips (reuse) */

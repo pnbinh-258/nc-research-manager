@@ -228,7 +228,12 @@ function handleRequest(params, body) {
     try { return json_({ ok: true, data: firstRun_() }); } catch (e) { return json_({ ok: false, error: e.message }); }
   }
   if (action === 'login') {
-    try { return json_({ ok: true, data: login_(body.data || {}) }); }
+    try {
+      // Hỗ trợ cả GET (params.email + params.ph) và POST (body.data.email + body.data.password)
+      var loginData = (body && body.data) ? body.data
+        : { email: params.email || '', ph: params.ph || '' };
+      return json_({ ok: true, data: login_(loginData) });
+    }
     catch (e) { return json_({ ok: false, error: e.message }); }
   }
 
@@ -344,18 +349,21 @@ function ensurePasswordHashCol_() {
   _sheetCache = {}; // xóa cache để đọc lại
 }
 
-/** Đăng nhập bằng email + mật khẩu — trả về token và thông tin user */
+/** Đăng nhập bằng email + mật khẩu — trả về token và thông tin user.
+ *  Nhận data.ph (SHA-256 hex của password, hash ở client) HOẶC data.password (plaintext, hash ở server).
+ */
 function login_(data) {
   var email = String(data.email || '').toLowerCase().trim();
-  var password = String(data.password || '');
-  if (!email || !password) throw new Error('Thiếu email hoặc mật khẩu');
+  // ph = pre-hashed từ browser (crypto.subtle SHA-256); password = plaintext từ POST cũ
+  var inputHash = data.ph ? String(data.ph) : (data.password ? hashPassword_(String(data.password)) : '');
+  if (!email || !inputHash) throw new Error('Thiếu email hoặc mật khẩu');
   ensurePasswordHashCol_();
   var rows = readSheet_(SHEETS.USERS);
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i].email).toLowerCase() === email) {
       var storedHash = String(rows[i].password_hash || '');
       if (!storedHash) throw new Error('Tài khoản chưa đặt mật khẩu. Liên hệ admin để đặt mật khẩu.');
-      if (hashPassword_(password) !== storedHash) throw new Error('Mật khẩu không đúng');
+      if (inputHash !== storedHash) throw new Error('Mật khẩu không đúng');
       var tok = String(rows[i].token || '');
       if (!tok) {
         tok = newToken_();

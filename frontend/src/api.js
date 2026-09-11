@@ -49,21 +49,26 @@ export async function apiGet(action, params = {}) {
   return parseResponse(res);
 }
 
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export async function apiLogin(email, password) {
-  // demo mode chỉ khi cả email lẫn password đều là 'demo'
   if (email === 'demo' && password === 'demo') {
     saveConfig('demo', 'demo');
     return demoCall('login', {}, { email, password });
   }
-  // real login: luôn dùng URL thật, bỏ qua nc_api_url = 'demo' từ session cũ
   const { apiUrl } = getConfig();
-  const url = (!apiUrl || apiUrl === 'demo') ? DEFAULT_API_URL : apiUrl;
-  saveConfig(url, getConfig().token); // đảm bảo URL thật được lưu lại
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'login', data: { email, password } }),
-  });
+  const baseUrl = (!apiUrl || apiUrl === 'demo') ? DEFAULT_API_URL : apiUrl;
+  saveConfig(baseUrl, getConfig().token);
+  // hash password ở client trước khi gửi — plain password không rời khỏi browser
+  const ph = await sha256(password);
+  const url = new URL(baseUrl);
+  url.searchParams.set('action', 'login');
+  url.searchParams.set('email', email.trim().toLowerCase());
+  url.searchParams.set('ph', ph);
+  const res = await fetch(url.toString());
   return parseResponse(res);
 }
 

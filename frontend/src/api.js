@@ -3,7 +3,7 @@
 import { demoCall } from './demo.js';
 
 // URL mặc định — tự điền khi host trên GitHub Pages (không cần nhập tay)
-const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbxXr89yyyRlMOrQMbmpdPhxM4wWSWMEUtVjfmXZirN5XLN2tVAcpijVCMWXQ1-O2pRP/exec';
+export const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbxXr89yyyRlMOrQMbmpdPhxM4wWSWMEUtVjfmXZirN5XLN2tVAcpijVCMWXQ1-O2pRP/exec';
 
 export function getConfig() {
   return {
@@ -60,15 +60,17 @@ export async function apiLogin(email, password) {
     return demoCall('login', {}, { email, password });
   }
   const { apiUrl } = getConfig();
-  const baseUrl = (!apiUrl || apiUrl === 'demo') ? DEFAULT_API_URL : apiUrl;
+  // luôn dùng DEFAULT_API_URL nếu chưa có URL hợp lệ
+  const baseUrl = (apiUrl && apiUrl !== 'demo' && apiUrl.startsWith('http'))
+    ? apiUrl : DEFAULT_API_URL;
   saveConfig(baseUrl, getConfig().token);
-  // hash password ở client trước khi gửi — plain password không rời khỏi browser
   const ph = await sha256(password);
-  const url = new URL(baseUrl);
-  url.searchParams.set('action', 'login');
-  url.searchParams.set('email', email.trim().toLowerCase());
-  url.searchParams.set('ph', ph);
-  const res = await fetch(url.toString());
+  // Dùng string concatenation thay new URL() để tránh lỗi trình duyệt với URL dài
+  const fetchUrl = baseUrl
+    + '?action=login'
+    + '&email=' + encodeURIComponent(email.trim().toLowerCase())
+    + '&ph=' + ph;
+  const res = await fetch(fetchUrl);
   return parseResponse(res);
 }
 

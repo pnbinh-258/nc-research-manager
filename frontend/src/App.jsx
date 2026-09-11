@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { apiGet, apiLogin, getConfig, saveConfig, clearConfig } from './api.js';
+import { apiGet, apiLogin, getConfig, saveConfig, clearConfig, DEFAULT_API_URL } from './api.js';
 import { ErrorBox, Field } from './ui.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Studies from './pages/Studies.jsx';
@@ -28,8 +28,10 @@ function LoginScreen({ onLogin }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  // không pre-fill URL demo từ session cũ
-  const [apiUrl, setApiUrl] = useState(cfg.apiUrl && cfg.apiUrl !== 'demo' ? cfg.apiUrl : '');
+  // chỉ pre-fill nếu user đã tự nhập URL tùy chỉnh (khác mặc định và khác 'demo')
+  const [apiUrl, setApiUrl] = useState(
+    cfg.apiUrl && cfg.apiUrl !== 'demo' && cfg.apiUrl !== DEFAULT_API_URL ? cfg.apiUrl : ''
+  );
 
   const doLogin = async (loginEmail, loginPassword, loginUrl) => {
     setBusy(true);

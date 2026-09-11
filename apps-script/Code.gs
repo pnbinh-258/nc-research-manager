@@ -223,9 +223,36 @@ function handleRequest(params, body) {
   var action = (params && params.action) || (body && body.action) || '';
   var token = (params && params.token) || (body && body.token) || '';
 
-  // firstRun và login không cần token
+  // firstRun, login, bootstrapAdmin không cần token
   if (action === 'firstRun') {
     try { return json_({ ok: true, data: firstRun_() }); } catch (e) { return json_({ ok: false, error: e.message }); }
+  }
+  // bootstrapAdmin: đặt mật khẩu qua URL — chỉ hoạt động với đúng secret
+  // Ví dụ: ?action=bootstrapAdmin&secret=NC115_BOOT&email=abc@gmail.com&password=mypass
+  if (action === 'bootstrapAdmin') {
+    try {
+      if ((params.secret || '') !== 'NC115_BOOT') return json_({ ok: false, error: 'Sai secret' });
+      var bEmail = String(params.email || '').toLowerCase().trim();
+      var bPwd   = String(params.password || '');
+      if (!bEmail || bPwd.length < 4) return json_({ ok: false, error: 'Thiếu email hoặc mật khẩu' });
+      ensurePasswordHashCol_();
+      var sheet = getSheet_(SHEETS.USERS);
+      var values = sheet.getDataRange().getValues();
+      var hdr = values[0];
+      var eCol = hdr.indexOf('email');
+      var hCol = hdr.indexOf('password_hash');
+      var tCol = hdr.indexOf('token');
+      for (var bi = 1; bi < values.length; bi++) {
+        if (String(values[bi][eCol]).toLowerCase().trim() === bEmail) {
+          sheet.getRange(bi + 1, hCol + 1).setValue(hashPassword_(bPwd));
+          return json_({ ok: true, data: { message: 'OK', email: bEmail, token: values[bi][tCol] } });
+        }
+      }
+      // Chưa có → tạo mới
+      var newTok = newToken_();
+      sheet.appendRow([bEmail, 'admin', 'Admin', 'ALL', newTok, hashPassword_(bPwd)]);
+      return json_({ ok: true, data: { message: 'Created', email: bEmail, token: newTok } });
+    } catch (e) { return json_({ ok: false, error: e.message }); }
   }
   if (action === 'login') {
     try {
@@ -403,30 +430,40 @@ function setPassword_(user, data) {
 /**
  * Chạy hàm này trong Apps Script Editor để đặt mật khẩu admin.
  * Sửa biến EMAIL và PASSWORD bên dưới rồi nhấn Run.
+ * Kết quả xem trong tab "Nhật ký thực thi" hoặc View > Logs.
  */
 function setAdminPassword() {
-  var EMAIL = Session.getEffectiveUser().getEmail(); // email của bạn
-  var PASSWORD = 'Admin@115'; // ← ĐỔI MẬT KHẨU NÀY trước khi chạy
+  var EMAIL = 'pnbinh@gmail.com'; // ← email admin
+  var PASSWORD = 'pnbinh85';      // ← mật khẩu
+  console.log('▶ Bắt đầu setAdminPassword cho: ' + EMAIL);
   ensurePasswordHashCol_();
   var sheet = getSheet_(SHEETS.USERS);
+  var ss = getOrCreateSpreadsheet_();
+  console.log('📊 Spreadsheet: ' + ss.getUrl());
   var values = sheet.getDataRange().getValues();
+  console.log('👥 Số dòng Users (incl header): ' + values.length);
   var headers = values[0];
+  console.log('Headers: ' + JSON.stringify(headers));
   var emailCol = headers.indexOf('email');
   var hashCol  = headers.indexOf('password_hash');
   var tokenCol = headers.indexOf('token');
+  console.log('emailCol=' + emailCol + ' hashCol=' + hashCol + ' tokenCol=' + tokenCol);
   for (var i = 1; i < values.length; i++) {
-    if (String(values[i][emailCol]).toLowerCase() === EMAIL.toLowerCase()) {
-      sheet.getRange(i + 1, hashCol + 1).setValue(hashPassword_(PASSWORD));
-      Logger.log('✅ Đặt mật khẩu thành công cho: ' + EMAIL);
-      Logger.log('   Mật khẩu: ' + PASSWORD);
-      Logger.log('   Token: ' + values[i][tokenCol]);
+    var rowEmail = String(values[i][emailCol]).toLowerCase().trim();
+    console.log('Row ' + i + ': ' + rowEmail);
+    if (rowEmail === EMAIL.toLowerCase().trim()) {
+      var hash = hashPassword_(PASSWORD);
+      sheet.getRange(i + 1, hashCol + 1).setValue(hash);
+      console.log('✅ Đặt mật khẩu OK cho: ' + EMAIL + ' | hash: ' + hash.slice(0,8) + '...');
+      console.log('   Token: ' + values[i][tokenCol]);
       return;
     }
   }
-  // Nếu chưa có user, tạo mới
+  // Chưa có user → tạo mới
   var tok = newToken_();
-  sheet.appendRow([EMAIL, 'admin', 'Admin', 'ALL', tok, hashPassword_(PASSWORD)]);
-  Logger.log('✅ Tạo admin mới: ' + EMAIL + ' | Mật khẩu: ' + PASSWORD + ' | Token: ' + tok);
+  var hash = hashPassword_(PASSWORD);
+  sheet.appendRow([EMAIL, 'admin', 'Admin', 'ALL', tok, hash]);
+  console.log('✅ Tạo admin mới: ' + EMAIL + ' | hash: ' + hash.slice(0,8) + '... | token: ' + tok);
 }
 
 /** admin ghi mọi NC; investigator chỉ ghi NC được assign (assigned_studies = "ALL" hoặc "NC001,NC002") */

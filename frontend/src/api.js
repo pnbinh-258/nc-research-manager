@@ -39,13 +39,12 @@ export async function apiGet(action, params = {}) {
   const { apiUrl, token } = getConfig();
   if (!apiUrl) throw new Error('Chưa cấu hình API URL');
   if (apiUrl === 'demo') return demoCall(action, params);
-  const url = new URL(apiUrl);
-  url.searchParams.set('action', action);
-  url.searchParams.set('token', token);
+  const base = (apiUrl.startsWith('http')) ? apiUrl : DEFAULT_API_URL;
+  let qs = '?action=' + encodeURIComponent(action) + '&token=' + encodeURIComponent(token);
   Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+    if (v !== undefined && v !== null && v !== '') qs += '&' + k + '=' + encodeURIComponent(v);
   });
-  const res = await fetch(url.toString());
+  const res = await fetch(base + qs);
   return parseResponse(res);
 }
 

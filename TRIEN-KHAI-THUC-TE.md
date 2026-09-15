@@ -4,15 +4,17 @@
 
 | Thành phần | Địa chỉ |
 |---|---|
-| **Web app** (gửi link này cho người dùng) | https://script.google.com/macros/s/AKfycbxXr89yyyRlMOrQMbmpdPhxM4wWSWMEUtVjfmXZirN5XLN2tVAcpijVCMWXQ1-O2pRP/exec |
+| **🌟 Web app chính** (gửi link này cho người dùng) | **https://pnbinh-258.github.io/nc-research-manager/** |
+| API backend (Apps Script) | https://script.google.com/macros/s/AKfycbxXr89yyyRlMOrQMbmpdPhxM4wWSWMEUtVjfmXZirN5XLN2tVAcpijVCMWXQ1-O2pRP/exec |
 | Database (Google Sheets `NC-Database`) | https://docs.google.com/spreadsheets/d/1om5Ztira3rzOK-Kl-yed1d8zuHQUXceyOx_flz7xTEs/edit |
 | Apps Script project `NC-API` | https://script.google.com/u/0/home/projects/1hqfVB8L1znCaXOL87wU_uaVM2yO1ZJNgQgdezqhPORcl9NNRUqrkTpQ0/edit |
 | Mapping danh tính (CHỈ PI) `NC-Mapping-CONFIDENTIAL` | https://docs.google.com/spreadsheets/d/14J8LuMfWT0rAOCscHpCecI1zwyc-IH2ivPCIJMpqsew/edit |
+| Source code | https://github.com/pnbinh-258/nc-research-manager |
 
-- Web app **vừa là frontend vừa là API** — một URL duy nhất, không cần hosting riêng.
-- Deployment ID: `AKfycbxXr89yyyRlMOrQMbmpdPhxM4wWSWMEUtVjfmXZirN5XLN2tVAcpijVCMWXQ1-O2pRP`
-- Đăng nhập: mở web app → API URL đã tự điền → nhập **token cá nhân** (cột `token`, sheet `Users`).
-- Token admin hiện tại: xem sheet `Users` dòng 2.
+- Frontend host trên **GitHub Pages** — không có banner Apps Script, tải nhanh qua CDN.
+- API URL đã được hardcode → người dùng chỉ cần nhập **token cá nhân**.
+- Deployment ID Apps Script: `AKfycbxXr89yyyRlMOrQMbmpdPhxM4wWSWMEUtVjfmXZirN5XLN2tVAcpijVCMWXQ1-O2pRP`
+- Token admin: xem sheet `Users` dòng 2.
 
 ## ✅ Đã kiểm chứng end-to-end (11/06/2026)
 
@@ -28,6 +30,14 @@
 Vào sheet `Users` thêm dòng: email, role (`admin`/`investigator`/`readonly`), tên, `assigned_studies` (`ALL` hoặc `NC001,NC003`), token (chuỗi ngẫu nhiên ≥20 ký tự — chạy hàm `newToken_()` trong Apps Script editor để sinh). Gửi token riêng cho từng người.
 
 ## 🔄 Cập nhật code sau này
+
+### Cập nhật Frontend (GitHub Pages)
+```powershell
+Set-Location "D:\OneDrive\1 BVND 115\BENH VIEN\1 KHOA BLMMN\3 NGHIEN CUU KHOA HOC\QUAN LY DU AN NGHIEN CUU\frontend"
+npm run deploy   # build + push lên gh-pages branch tự động
+```
+
+### Cập nhật Backend (Apps Script) + Frontend cùng lúc
 
 Toolchain đã cài sẵn: `clasp` (đã login), thư mục `gas/` đã liên kết project.
 

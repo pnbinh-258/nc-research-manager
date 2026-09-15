@@ -985,6 +985,36 @@ function nlDashboard_() {
     monthIndex++;
   }
 
+  // Thu tuyển theo tuần (từ 17/8/2026)
+  var enrollByWeek = [];
+  var wStart = new Date(2026, 7, 17); // 17/08/2026
+  var weekNum = 1;
+  while (wStart <= today) {
+    var wEnd = new Date(wStart.getTime() + 7 * 86400000);
+    var wCount = patients.filter(function(p) {
+      if (!p.enrollment_date) return false;
+      var ed = new Date(p.enrollment_date);
+      return ed >= wStart && ed < wEnd;
+    }).length;
+    var wLabel = 'T' + weekNum + ' (' +
+      ('0' + wStart.getDate()).slice(-2) + '/' +
+      ('0' + (wStart.getMonth() + 1)).slice(-2) + ')';
+    var isCurrentWeek = (wEnd > today);
+    enrollByWeek.push({
+      week: weekNum,
+      label: wLabel,
+      week_start: fmtDate_(wStart),
+      week_end: fmtDate_(new Date(Math.min(wEnd.getTime() - 86400000, today.getTime()))),
+      count: wCount,
+      is_partial: isCurrentWeek,
+      days_in_week: isCurrentWeek
+        ? Math.ceil((today - wStart) / 86400000)
+        : 7
+    });
+    wStart = wEnd;
+    weekNum++;
+  }
+
   var result = {
     sites: Object.values(siteMap),
     patients_total: patients.length,
@@ -995,6 +1025,7 @@ function nlDashboard_() {
     site_ids: siteIds,
     alerts: alerts,
     enroll_by_month: enrollByMonth,
+    enroll_by_week: enrollByWeek,
   };
   try { sc.put(NL_DASH_CACHE_KEY, JSON.stringify(result), 60); } catch(e) {}
   return result;

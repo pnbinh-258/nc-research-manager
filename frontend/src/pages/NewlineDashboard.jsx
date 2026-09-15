@@ -165,6 +165,97 @@ const STUDY_MONTH_KEYS = (() => {
   return out;
 })();
 
+function WeeklyRateChart({ enrollByWeek, target }) {
+  const weeks = (enrollByWeek || []);
+  if (weeks.length === 0) return null;
+
+  // Tổng tuần trong 24 tháng ≈ 24 × 30.4375 / 7 ≈ 104 tuần
+  const minWeekly = target / (24 * 30.4375 / 7); // ~4 BN/tuần
+  const maxCount = Math.max(...weeks.map(w => w.count), Math.ceil(minWeekly) + 2);
+
+  const W = 600, H = 140;
+  const PAD = { t: 16, r: 16, b: 32, l: 36 };
+  const innerW = W - PAD.l - PAD.r;
+  const innerH = H - PAD.t - PAD.b;
+  const barW = Math.max(4, Math.floor(innerW / weeks.length) - 3);
+  const xOf = i => PAD.l + (i + 0.5) * (innerW / weeks.length);
+  const yOf = v => PAD.t + innerH - (v / (maxCount * 1.15)) * innerH;
+  const minY = yOf(minWeekly);
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text)' }}>
+        Tốc độ thu tuyển theo tuần
+        <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)', marginLeft: 8 }}>
+          so với ngưỡng tối thiểu {minWeekly.toFixed(1)} BN/tuần
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
+        {/* Vùng dưới ngưỡng */}
+        <rect x={PAD.l} y={minY} width={innerW} height={H - PAD.b - minY}
+          fill="rgba(244,67,54,0.06)" />
+
+        {/* Grid lines */}
+        {[0, Math.ceil(minWeekly), Math.ceil(maxCount * 0.6), Math.ceil(maxCount)].filter((v,i,a)=>a.indexOf(v)===i).map(v => (
+          <g key={v}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={yOf(v)} y2={yOf(v)}
+              stroke="var(--border)" strokeWidth="1" strokeDasharray={v === 0 ? '' : '3,3'} />
+            <text x={PAD.l - 4} y={yOf(v) + 4} fontSize="9" textAnchor="end" fill="var(--muted)">{v}</text>
+          </g>
+        ))}
+
+        {/* Đường ngưỡng tối thiểu */}
+        <line x1={PAD.l} x2={W - PAD.r} y1={minY} y2={minY}
+          stroke="#FF6D00" strokeWidth="1.5" strokeDasharray="5,3" opacity="0.9" />
+        <text x={W - PAD.r + 2} y={minY + 4} fontSize="9" fill="#FF6D00" fontWeight="700">
+          {minWeekly.toFixed(1)}
+        </text>
+
+        {/* Bars */}
+        {weeks.map((w, i) => {
+          const isAbove = w.count >= minWeekly;
+          const isPartial = w.is_partial;
+          const color = isAbove ? '#00C4A7' : w.count >= minWeekly * 0.6 ? '#FF9800' : '#F44336';
+          const barH = Math.max(2, (w.count / (maxCount * 1.15)) * innerH);
+          const bx = xOf(i) - barW / 2;
+          const by = PAD.t + innerH - barH;
+          return (
+            <g key={i}>
+              <rect x={bx} y={by} width={barW} height={barH}
+                fill={color} rx="2" opacity={isPartial ? 0.55 : 0.9} />
+              {isPartial && (
+                <rect x={bx} y={by} width={barW} height={barH}
+                  fill="none" stroke={color} strokeWidth="1.5" strokeDasharray="3,2" rx="2" />
+              )}
+              {w.count > 0 && (
+                <text x={xOf(i)} y={by - 3} fontSize="9" textAnchor="middle"
+                  fill={color} fontWeight="700">{w.count}</text>
+              )}
+              <text x={xOf(i)} y={H - 4} fontSize="9" textAnchor="middle" fill="var(--muted)">
+                {w.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--muted)', marginTop: 4, flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 10, height: 10, background: '#00C4A7', borderRadius: 2, display: 'inline-block' }} />
+          Đạt/vượt ngưỡng
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 10, height: 10, background: '#F44336', borderRadius: 2, display: 'inline-block' }} />
+          Dưới ngưỡng
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 10, height: 10, background: 'rgba(0,196,167,0.4)', border: '1.5px dashed #00C4A7', borderRadius: 2, display: 'inline-block' }} />
+          Tuần đang diễn ra
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
   const W = 700, H = 200, PAD = { t: 24, r: 60, b: 36, l: 44 };
   const innerW = W - PAD.l - PAD.r, innerH = H - PAD.t - PAD.b;
@@ -289,7 +380,7 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
   );
 }
 
-function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
+function ProjectionSection({ enrollByMonth, enrollByWeek, patientsTotal, total_target }) {
   const target = Math.max(total_target || 0, TOTAL_TARGET);
   // Tính từ ngày khởi động thực tế (17/8/2026), không đếm tháng dương lịch
   const STUDY_START_MS = new Date('2026-08-17').getTime();
@@ -371,6 +462,12 @@ function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
           Vùng nguy hiểm (dưới ngưỡng)
         </span>
       </div>
+
+      {enrollByWeek && enrollByWeek.length > 0 && (
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16 }}>
+          <WeeklyRateChart enrollByWeek={enrollByWeek} target={target} />
+        </div>
+      )}
     </div>
   );
 }
@@ -816,6 +913,7 @@ export default function NewlineDashboard({ user }) {
       {/* Projection chart */}
       <ProjectionSection
         enrollByMonth={enroll_by_month}
+        enrollByWeek={data?.enroll_by_week}
         patientsTotal={patients_total}
         total_target={total_target}
       />

@@ -151,6 +151,213 @@ function SiteCard({ site, onClick, onEdit, canEdit }) {
 
 const MONTHS_VI = ['','Th.1','Th.2','Th.3','Th.4','Th.5','Th.6','Th.7','Th.8','Th.9','Th.10','Th.11','Th.12'];
 
+// ── Projection chart ────────────────────────────────────────────────
+
+const TOTAL_TARGET = 418;
+
+const STUDY_MONTH_KEYS = (() => {
+  const out = [];
+  let y = 2026, m = 8;
+  for (let i = 0; i < 24; i++) {
+    out.push(`${String(m).padStart(2, '0')}/${y}`);
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+})();
+
+const PROJ_SCENARIOS = [
+  { rate: 18, color: '#1a7035', dash: '',    label: 'Lạc quan (~18/th)' },
+  { rate: 10, color: '#a85000', dash: '7,4', label: 'Thực tế dự báo (~10/th)' },
+  { rate:  5, color: '#9a1a1a', dash: '4,5', label: 'Thận trọng (~5/th)' },
+];
+
+function ProjectionSvg({ enrollByMonth, target }) {
+  const W = 700, H = 200, PAD = { t: 24, r: 56, b: 36, l: 44 };
+  const innerW = W - PAD.l - PAD.r, innerH = H - PAD.t - PAD.b;
+
+  const keyToIdx = Object.fromEntries(STUDY_MONTH_KEYS.map((k, i) => [k, i]));
+  const actualCumul = Array(24).fill(null);
+  let cumActual = 0;
+  (enrollByMonth || []).forEach(m => {
+    const idx = keyToIdx[m.month];
+    if (idx !== undefined) { cumActual += m.count; actualCumul[idx] = cumActual; }
+  });
+  const lastIdx = actualCumul.reduce((mx, v, i) => (v !== null ? i : mx), -1);
+  const lastVal = lastIdx >= 0 ? actualCumul[lastIdx] : 0;
+
+  const planCumul = STUDY_MONTH_KEYS.map((_, i) => Math.round((i + 1) * target / 24));
+
+  const scenCumul = PROJ_SCENARIOS.map(s => {
+    const arr = Array(24).fill(null);
+    if (lastIdx >= 0) arr[lastIdx] = lastVal;
+    for (let i = lastIdx + 1; i < 24; i++) arr[i] = (arr[i - 1] ?? lastVal) + s.rate;
+    return arr;
+  });
+
+  const optMax = scenCumul[0].reduce((mx, v) => (v !== null && v > mx ? v : mx), 0);
+  const yMax = Math.max(optMax, target) * 1.05;
+  const xOf = i => PAD.l + (i + 0.5) * (innerW / 24);
+  const yOf = v => PAD.t + innerH - (v / yMax) * innerH;
+  const ptStr = arr => arr.map((v, i) => v !== null ? `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}` : null).filter(Boolean).join(' ');
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
+      {/* Grid + y-axis labels */}
+      {[0, 100, 200, 300, target].map(t => {
+        const y = yOf(t); const isT = t === target;
+        return (
+          <g key={t}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y} y2={y}
+              stroke={isT ? '#6b21a8' : 'var(--border)'}
+              strokeWidth={isT ? 1.5 : 1}
+              strokeDasharray={isT ? '4,5' : t === 0 ? '' : '3,3'}
+              opacity={isT ? 0.65 : undefined} />
+            <text x={PAD.l - 4} y={y + 4} fontSize="10" textAnchor="end"
+              fill={isT ? '#6b21a8' : 'var(--muted)'} fontWeight={isT ? '700' : '400'}>{t}</text>
+            {isT && <text x={W - PAD.r + 4} y={y + 4} fontSize="10" fill="#6b21a8" fontWeight="700">← {target}</text>}
+          </g>
+        );
+      })}
+
+      {/* Scenario lines */}
+      {scenCumul.map((arr, si) => {
+        const p = ptStr(arr);
+        return p ? (
+          <polyline key={si} points={p} fill="none"
+            stroke={PROJ_SCENARIOS[si].color} strokeWidth="1.5" strokeLinejoin="round"
+            strokeDasharray={PROJ_SCENARIOS[si].dash || undefined} opacity="0.85" />
+        ) : null;
+      })}
+
+      {/* Plan line */}
+      <polyline points={planCumul.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')}
+        fill="none" stroke="#1a56b0" strokeWidth="1.5" strokeDasharray="7,4" opacity="0.7" />
+
+      {/* Actual line */}
+      {(() => {
+        const p = ptStr(actualCumul);
+        return p ? (
+          <g>
+            <polyline points={p} fill="none" stroke="#0b7a66" strokeWidth="2.5"
+              strokeLinejoin="round" strokeLinecap="round" />
+            {actualCumul.map((v, i) => v !== null ? (
+              <circle key={i} cx={xOf(i)} cy={yOf(v)} r="4" fill="#0b7a66" stroke="white" strokeWidth="1.5" />
+            ) : null)}
+          </g>
+        ) : null;
+      })()}
+
+      {/* Now marker */}
+      {lastIdx >= 0 && (
+        <g>
+          <line x1={xOf(lastIdx)} x2={xOf(lastIdx)} y1={PAD.t} y2={PAD.t + innerH}
+            stroke="#0b7a66" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
+          <text x={xOf(lastIdx) + 3} y={PAD.t + 11} fontSize="9" fill="#0b7a66" opacity="0.75">Hiện tại</text>
+        </g>
+      )}
+
+      {/* X labels (every 3 months) */}
+      {STUDY_MONTH_KEYS.map((k, i) => {
+        if (i % 3 !== 0 && i !== 23) return null;
+        const [mo] = k.split('/');
+        return (
+          <text key={i} x={xOf(i)} y={H - 2} fontSize="9" textAnchor="middle" fill="var(--muted)">
+            {MONTHS_VI[+mo]}
+          </text>
+        );
+      })}
+
+      {/* End value labels for scenarios */}
+      {scenCumul.map((arr, si) => {
+        const v = arr[23];
+        return v !== null ? (
+          <text key={si} x={W - PAD.r + 4} y={yOf(v) + 4} fontSize="10"
+            fill={PROJ_SCENARIOS[si].color} fontWeight="700">{v}</text>
+        ) : null;
+      })}
+    </svg>
+  );
+}
+
+function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
+  const target = Math.max(total_target || 0, TOTAL_TARGET);
+  const monthsElapsed = (enrollByMonth || []).length;
+  const planAtNow = Math.round(monthsElapsed * target / 24);
+  const vsPlan = patientsTotal - planAtNow;
+  const remainingMonths = 24 - monthsElapsed;
+  const neededRate = remainingMonths > 0
+    ? ((target - patientsTotal) / remainingMonths).toFixed(1) : '—';
+  const currentRate = monthsElapsed > 0
+    ? (patientsTotal / monthsElapsed).toFixed(1) : '—';
+
+  const kpiBox = color => ({
+    background: 'var(--bg, #f5f7fa)',
+    border: '1px solid var(--border)',
+    borderTop: `3px solid ${color}`,
+    borderRadius: 7,
+    padding: '10px 12px',
+  });
+
+  const kpis = [
+    { label: 'Đã thu tuyển', val: patientsTotal, unit: 'BN',
+      sub: `sau ${monthsElapsed} tháng`, color: '#1a73e8' },
+    { label: 'So kế hoạch',
+      val: (vsPlan >= 0 ? '+' : '') + vsPlan, unit: 'BN',
+      sub: `${patientsTotal} vs. ${planAtNow} dự kiến`,
+      color: vsPlan >= 0 ? '#188038' : '#d32f2f' },
+    { label: 'Tốc độ TB hiện tại', val: currentRate, unit: '/th',
+      sub: 'BN/tháng', color: '#e67e22' },
+    { label: 'Cần đạt để kịp hạn', val: neededRate, unit: '/th',
+      sub: `trong ${remainingMonths} tháng còn lại`, color: '#7b5ea7' },
+  ];
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:14 }}>
+        <div style={{ fontWeight:700, fontSize:15 }}>Dự báo tiến độ thu tuyển — 24 tháng</div>
+        <div style={{ fontSize:11, color:'var(--muted)' }}>
+          Th.8 2026 → Th.7 2028 · Mục tiêu {target} BN
+        </div>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:10, marginBottom:16 }}>
+        {kpis.map(k => (
+          <div key={k.label} style={kpiBox(k.color)}>
+            <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:'0.08em',
+              color:'var(--muted)', marginBottom:3 }}>{k.label}</div>
+            <div style={{ fontSize:22, fontWeight:700, color:k.color,
+              fontVariantNumeric:'tabular-nums', lineHeight:1.1 }}>
+              {k.val}<span style={{ fontSize:12, fontWeight:400, marginLeft:2 }}>{k.unit}</span>
+            </div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <ProjectionSvg enrollByMonth={enrollByMonth} target={target} />
+
+      <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:10,
+        fontSize:11, color:'var(--muted)' }}>
+        {[
+          { stroke:'#0b7a66', w:2.5, dash:'',    label:'Thực tế' },
+          { stroke:'#1a56b0', w:1.5, dash:'7,4', label:'Kế hoạch (~17/th)' },
+          ...PROJ_SCENARIOS.map(s => ({ stroke:s.color, w:1.5, dash:s.dash, label:s.label })),
+        ].map(l => (
+          <span key={l.label} style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <svg width="20" height="8" style={{ flexShrink:0 }}>
+              <line x1="0" y1="4" x2="20" y2="4" stroke={l.stroke}
+                strokeWidth={l.w} strokeDasharray={l.dash || undefined} />
+            </svg>
+            {l.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+
 function SvgChart({ enriched, siteIds, mode, totalTarget }) {
   const [hovered, setHovered] = useState(null);
   const W = 700, H = 240, PAD = { t: 36, r: 28, b: 44, l: 44 };
@@ -586,6 +793,13 @@ export default function NewlineDashboard({ user }) {
           siteIds={site_ids.length > 0 ? site_ids : sites.map(s => s.site_id)}
           totalTarget={total_target} />
       </div>
+
+      {/* Projection chart */}
+      <ProjectionSection
+        enrollByMonth={enroll_by_month}
+        patientsTotal={patients_total}
+        total_target={total_target}
+      />
     </div>
   );
 }

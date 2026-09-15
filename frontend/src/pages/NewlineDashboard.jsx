@@ -166,9 +166,9 @@ const STUDY_MONTH_KEYS = (() => {
 })();
 
 const PROJ_SCENARIOS = [
-  { rate: 18, color: '#1a7035', dash: '',    label: 'Lạc quan (~18/th)' },
-  { rate: 10, color: '#a85000', dash: '7,4', label: 'Thực tế dự báo (~10/th)' },
-  { rate:  5, color: '#9a1a1a', dash: '4,5', label: 'Thận trọng (~5/th)' },
+  { rate: 18, color: '#00C853', dash: '',    label: 'Lạc quan (~18/th)' },
+  { rate: 10, color: '#FF6D00', dash: '7,4', label: 'Thực tế dự báo (~10/th)' },
+  { rate:  5, color: '#F44336', dash: '4,5', label: 'Thận trọng (~5/th)' },
 ];
 
 function ProjectionSvg({ enrollByMonth, target }) {
@@ -231,17 +231,17 @@ function ProjectionSvg({ enrollByMonth, target }) {
 
       {/* Plan line */}
       <polyline points={planCumul.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')}
-        fill="none" stroke="#1a56b0" strokeWidth="1.5" strokeDasharray="7,4" opacity="0.7" />
+        fill="none" stroke="#2979FF" strokeWidth="1.5" strokeDasharray="7,4" opacity="0.9" />
 
       {/* Actual line */}
       {(() => {
         const p = ptStr(actualCumul);
         return p ? (
           <g>
-            <polyline points={p} fill="none" stroke="#0b7a66" strokeWidth="2.5"
+            <polyline points={p} fill="none" stroke="#00C4A7" strokeWidth="2.5"
               strokeLinejoin="round" strokeLinecap="round" />
             {actualCumul.map((v, i) => v !== null ? (
-              <circle key={i} cx={xOf(i)} cy={yOf(v)} r="4" fill="#0b7a66" stroke="white" strokeWidth="1.5" />
+              <circle key={i} cx={xOf(i)} cy={yOf(v)} r="4" fill="#00C4A7" stroke="white" strokeWidth="1.5" />
             ) : null)}
           </g>
         ) : null;
@@ -256,8 +256,8 @@ function ProjectionSvg({ enrollByMonth, target }) {
         return (
           <g>
             <line x1={nowX} x2={nowX} y1={PAD.t} y2={PAD.t + innerH}
-              stroke="#0b7a66" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
-            <text x={nowX + 3} y={PAD.t + 11} fontSize="9" fill="#0b7a66" opacity="0.75">Hiện tại</text>
+              stroke="#00C4A7" strokeWidth="1" strokeDasharray="3,4" opacity="0.5" />
+            <text x={nowX + 3} y={PAD.t + 11} fontSize="9" fill="#00C4A7" opacity="0.85">Hiện tại</text>
           </g>
         );
       })()}
@@ -349,8 +349,8 @@ function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
       <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:10,
         fontSize:11, color:'var(--muted)' }}>
         {[
-          { stroke:'#0b7a66', w:2.5, dash:'',    label:'Thực tế' },
-          { stroke:'#1a56b0', w:1.5, dash:'7,4', label:'Kế hoạch (~17/th)' },
+          { stroke:'#00C4A7', w:2.5, dash:'',    label:'Thực tế' },
+          { stroke:'#2979FF', w:1.5, dash:'7,4', label:'Kế hoạch (~17/th)' },
           ...PROJ_SCENARIOS.map(s => ({ stroke:s.color, w:1.5, dash:s.dash, label:s.label })),
         ].map(l => (
           <span key={l.label} style={{ display:'flex', alignItems:'center', gap:4 }}>

@@ -165,14 +165,8 @@ const STUDY_MONTH_KEYS = (() => {
   return out;
 })();
 
-const PROJ_SCENARIOS = [
-  { rate: 18, color: '#00C853', dash: '',    label: 'Lạc quan (~18/th)' },
-  { rate: 10, color: '#FF6D00', dash: '7,4', label: 'Thực tế dự báo (~10/th)' },
-  { rate:  5, color: '#F44336', dash: '4,5', label: 'Thận trọng (~5/th)' },
-];
-
-function ProjectionSvg({ enrollByMonth, target }) {
-  const W = 700, H = 200, PAD = { t: 24, r: 56, b: 36, l: 44 };
+function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
+  const W = 700, H = 200, PAD = { t: 24, r: 60, b: 36, l: 44 };
   const innerW = W - PAD.l - PAD.r, innerH = H - PAD.t - PAD.b;
 
   const keyToIdx = Object.fromEntries(STUDY_MONTH_KEYS.map((k, i) => [k, i]));
@@ -185,53 +179,72 @@ function ProjectionSvg({ enrollByMonth, target }) {
   const lastIdx = actualCumul.reduce((mx, v, i) => (v !== null ? i : mx), -1);
   const lastVal = lastIdx >= 0 ? actualCumul[lastIdx] : 0;
 
-  const planCumul = STUDY_MONTH_KEYS.map((_, i) => Math.round((i + 1) * target / 24));
+  // Ngưỡng tối thiểu cần đạt mỗi tháng để kịp 418 BN
+  const minRate = target / 24;
+  const planCumul = STUDY_MONTH_KEYS.map((_, i) => Math.round((i + 1) * minRate));
 
-  const scenCumul = PROJ_SCENARIOS.map(s => {
-    const arr = Array(24).fill(null);
-    if (lastIdx >= 0) arr[lastIdx] = lastVal;
-    for (let i = lastIdx + 1; i < 24; i++) arr[i] = (arr[i - 1] ?? lastVal) + s.rate;
-    return arr;
-  });
+  // Dự báo theo tốc độ thu tuyển hiện tại (chiếu thẳng từ điểm cuối)
+  const rate = currentRateNum || 0;
+  const forecastCumul = Array(24).fill(null);
+  if (lastIdx >= 0) {
+    forecastCumul[lastIdx] = lastVal;
+    for (let i = lastIdx + 1; i < 24; i++) forecastCumul[i] = Math.round(lastVal + rate * (i - lastIdx));
+  }
 
-  const optMax = scenCumul[0].reduce((mx, v) => (v !== null && v > mx ? v : mx), 0);
-  const yMax = Math.max(optMax, target) * 1.05;
+  const forecastEnd = forecastCumul[23] ?? lastVal;
+  const yMax = Math.max(forecastEnd, target) * 1.08;
   const xOf = i => PAD.l + (i + 0.5) * (innerW / 24);
   const yOf = v => PAD.t + innerH - (v / yMax) * innerH;
   const ptStr = arr => arr.map((v, i) => v !== null ? `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}` : null).filter(Boolean).join(' ');
 
+  // Vùng cảnh báo đỏ bên dưới đường ngưỡng tối thiểu
+  const dangerPoly = [
+    `${xOf(0).toFixed(1)},${yOf(planCumul[0]).toFixed(1)}`,
+    ...planCumul.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`),
+    `${xOf(23).toFixed(1)},${(PAD.t + innerH).toFixed(1)}`,
+    `${xOf(0).toFixed(1)},${(PAD.t + innerH).toFixed(1)}`,
+  ].join(' ');
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
+      {/* Vùng đỏ cảnh báo dưới ngưỡng tối thiểu */}
+      <polygon points={dangerPoly} fill="rgba(244,67,54,0.07)" />
+
       {/* Grid + y-axis labels */}
       {[0, 100, 200, 300, target].map(t => {
         const y = yOf(t); const isT = t === target;
         return (
           <g key={t}>
             <line x1={PAD.l} x2={W - PAD.r} y1={y} y2={y}
-              stroke={isT ? '#6b21a8' : 'var(--border)'}
+              stroke={isT ? '#AA00FF' : 'var(--border)'}
               strokeWidth={isT ? 1.5 : 1}
               strokeDasharray={isT ? '4,5' : t === 0 ? '' : '3,3'}
-              opacity={isT ? 0.65 : undefined} />
+              opacity={isT ? 0.7 : undefined} />
             <text x={PAD.l - 4} y={y + 4} fontSize="10" textAnchor="end"
-              fill={isT ? '#6b21a8' : 'var(--muted)'} fontWeight={isT ? '700' : '400'}>{t}</text>
-            {isT && <text x={W - PAD.r + 4} y={y + 4} fontSize="10" fill="#6b21a8" fontWeight="700">← {target}</text>}
+              fill={isT ? '#AA00FF' : 'var(--muted)'} fontWeight={isT ? '700' : '400'}>{t}</text>
+            {isT && <text x={W - PAD.r + 4} y={y + 4} fontSize="10" fill="#AA00FF" fontWeight="700">← {target}</text>}
           </g>
         );
       })}
 
-      {/* Scenario lines */}
-      {scenCumul.map((arr, si) => {
-        const p = ptStr(arr);
-        return p ? (
-          <polyline key={si} points={p} fill="none"
-            stroke={PROJ_SCENARIOS[si].color} strokeWidth="1.5" strokeLinejoin="round"
-            strokeDasharray={PROJ_SCENARIOS[si].dash || undefined} opacity="0.85" />
-        ) : null;
-      })}
-
-      {/* Plan line */}
+      {/* Đường ngưỡng tối thiểu — cam đậm, đứt nét */}
       <polyline points={planCumul.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')}
-        fill="none" stroke="#2979FF" strokeWidth="1.5" strokeDasharray="7,4" opacity="0.9" />
+        fill="none" stroke="#FF6D00" strokeWidth="2" strokeDasharray="6,4" opacity="0.9" />
+      <text x={W - PAD.r + 4} y={yOf(planCumul[23]) + 4} fontSize="10" fill="#FF6D00" fontWeight="700">{planCumul[23]}</text>
+
+      {/* Đường dự báo tốc độ hiện tại — xanh lá đứt nét */}
+      {ptStr(forecastCumul) && (
+        <g>
+          <polyline points={ptStr(forecastCumul)} fill="none"
+            stroke="#00C853" strokeWidth="1.8" strokeDasharray="8,4"
+            strokeLinejoin="round" opacity="0.9" />
+          {forecastCumul[23] !== null && (
+            <text x={W - PAD.r + 4} y={yOf(forecastCumul[23]) + 4} fontSize="10" fill="#00C853" fontWeight="700">
+              {forecastCumul[23]}
+            </text>
+          )}
+        </g>
+      )}
 
       {/* Actual line */}
       {(() => {
@@ -247,7 +260,7 @@ function ProjectionSvg({ enrollByMonth, target }) {
         ) : null;
       })()}
 
-      {/* Now marker — positioned at actual current date, not end of last data month */}
+      {/* Now marker */}
       {(() => {
         const elapsed = Math.max(0, Date.now() - new Date('2026-08-17').getTime());
         const eMonths = elapsed / (30.4375 * 86400000);
@@ -262,7 +275,7 @@ function ProjectionSvg({ enrollByMonth, target }) {
         );
       })()}
 
-      {/* X labels (every 3 months) */}
+      {/* X labels */}
       {STUDY_MONTH_KEYS.map((k, i) => {
         if (i % 3 !== 0 && i !== 23) return null;
         const [mo] = k.split('/');
@@ -271,15 +284,6 @@ function ProjectionSvg({ enrollByMonth, target }) {
             {MONTHS_VI[+mo]}
           </text>
         );
-      })}
-
-      {/* End value labels for scenarios */}
-      {scenCumul.map((arr, si) => {
-        const v = arr[23];
-        return v !== null ? (
-          <text key={si} x={W - PAD.r + 4} y={yOf(v) + 4} fontSize="10"
-            fill={PROJ_SCENARIOS[si].color} fontWeight="700">{v}</text>
-        ) : null;
       })}
     </svg>
   );
@@ -297,8 +301,8 @@ function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
   const remainingMonths = 24 - elapsedMonths;
   const neededRate = remainingMonths > 0
     ? ((target - patientsTotal) / remainingMonths).toFixed(1) : '—';
-  const currentRate = elapsedDays > 0
-    ? (patientsTotal / elapsedMonths).toFixed(1) : '—';
+  const currentRateNum = elapsedDays > 0 ? patientsTotal / elapsedMonths : 0;
+  const currentRate = currentRateNum > 0 ? currentRateNum.toFixed(1) : '—';
 
   const kpiBox = color => ({
     background: 'var(--bg, #f5f7fa)',
@@ -344,23 +348,28 @@ function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
         ))}
       </div>
 
-      <ProjectionSvg enrollByMonth={enrollByMonth} target={target} />
+      <ProjectionSvg enrollByMonth={enrollByMonth} target={target} currentRateNum={currentRateNum} />
 
-      <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:10,
-        fontSize:11, color:'var(--muted)' }}>
+      <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginTop:10,
+        fontSize:11, color:'var(--muted)', alignItems:'center' }}>
         {[
-          { stroke:'#00C4A7', w:2.5, dash:'',    label:'Thực tế' },
-          { stroke:'#2979FF', w:1.5, dash:'7,4', label:'Kế hoạch (~17/th)' },
-          ...PROJ_SCENARIOS.map(s => ({ stroke:s.color, w:1.5, dash:s.dash, label:s.label })),
+          { stroke:'#00C4A7', w:2.5, dash:'',    label:'Thực tế (lũy kế)' },
+          { stroke:'#00C853', w:1.8, dash:'8,4', label:`Dự báo tốc độ hiện tại (~${currentRate}/th)` },
+          { stroke:'#FF6D00', w:2,   dash:'6,4', label:`Ngưỡng tối thiểu (~${(target/24).toFixed(1)}/th)` },
         ].map(l => (
-          <span key={l.label} style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <svg width="20" height="8" style={{ flexShrink:0 }}>
-              <line x1="0" y1="4" x2="20" y2="4" stroke={l.stroke}
+          <span key={l.label} style={{ display:'flex', alignItems:'center', gap:5 }}>
+            <svg width="22" height="8" style={{ flexShrink:0 }}>
+              <line x1="0" y1="4" x2="22" y2="4" stroke={l.stroke}
                 strokeWidth={l.w} strokeDasharray={l.dash || undefined} />
             </svg>
             {l.label}
           </span>
         ))}
+        <span style={{ display:'flex', alignItems:'center', gap:5 }}>
+          <span style={{ width:14, height:10, background:'rgba(244,67,54,0.15)',
+            border:'1px solid rgba(244,67,54,0.4)', borderRadius:2, flexShrink:0 }} />
+          Vùng nguy hiểm (dưới ngưỡng)
+        </span>
       </div>
     </div>
   );

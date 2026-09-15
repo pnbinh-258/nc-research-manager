@@ -247,14 +247,20 @@ function ProjectionSvg({ enrollByMonth, target }) {
         ) : null;
       })()}
 
-      {/* Now marker */}
-      {lastIdx >= 0 && (
-        <g>
-          <line x1={xOf(lastIdx)} x2={xOf(lastIdx)} y1={PAD.t} y2={PAD.t + innerH}
-            stroke="#0b7a66" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
-          <text x={xOf(lastIdx) + 3} y={PAD.t + 11} fontSize="9" fill="#0b7a66" opacity="0.75">Hiện tại</text>
-        </g>
-      )}
+      {/* Now marker — positioned at actual current date, not end of last data month */}
+      {(() => {
+        const elapsed = Math.max(0, Date.now() - new Date('2026-08-17').getTime());
+        const eMonths = elapsed / (30.4375 * 86400000);
+        if (eMonths <= 0) return null;
+        const nowX = PAD.l + Math.min(eMonths, 23.9) * (innerW / 24);
+        return (
+          <g>
+            <line x1={nowX} x2={nowX} y1={PAD.t} y2={PAD.t + innerH}
+              stroke="#0b7a66" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
+            <text x={nowX + 3} y={PAD.t + 11} fontSize="9" fill="#0b7a66" opacity="0.75">Hiện tại</text>
+          </g>
+        );
+      })()}
 
       {/* X labels (every 3 months) */}
       {STUDY_MONTH_KEYS.map((k, i) => {
@@ -281,14 +287,18 @@ function ProjectionSvg({ enrollByMonth, target }) {
 
 function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
   const target = Math.max(total_target || 0, TOTAL_TARGET);
-  const monthsElapsed = (enrollByMonth || []).length;
-  const planAtNow = Math.round(monthsElapsed * target / 24);
+  // Tính từ ngày khởi động thực tế (17/8/2026), không đếm tháng dương lịch
+  const STUDY_START_MS = new Date('2026-08-17').getTime();
+  const elapsedMs = Math.max(0, Date.now() - STUDY_START_MS);
+  const elapsedDays = Math.floor(elapsedMs / 86400000);
+  const elapsedMonths = elapsedMs / (30.4375 * 86400000);
+  const planAtNow = Math.round(elapsedMonths * (target / 24));
   const vsPlan = patientsTotal - planAtNow;
-  const remainingMonths = 24 - monthsElapsed;
+  const remainingMonths = 24 - elapsedMonths;
   const neededRate = remainingMonths > 0
     ? ((target - patientsTotal) / remainingMonths).toFixed(1) : '—';
-  const currentRate = monthsElapsed > 0
-    ? (patientsTotal / monthsElapsed).toFixed(1) : '—';
+  const currentRate = elapsedDays > 0
+    ? (patientsTotal / elapsedMonths).toFixed(1) : '—';
 
   const kpiBox = color => ({
     background: 'var(--bg, #f5f7fa)',
@@ -300,15 +310,15 @@ function ProjectionSection({ enrollByMonth, patientsTotal, total_target }) {
 
   const kpis = [
     { label: 'Đã thu tuyển', val: patientsTotal, unit: 'BN',
-      sub: `sau ${monthsElapsed} tháng`, color: '#1a73e8' },
+      sub: `sau ${elapsedDays} ngày (từ 17/8)`, color: '#1a73e8' },
     { label: 'So kế hoạch',
       val: (vsPlan >= 0 ? '+' : '') + vsPlan, unit: 'BN',
       sub: `${patientsTotal} vs. ${planAtNow} dự kiến`,
       color: vsPlan >= 0 ? '#188038' : '#d32f2f' },
-    { label: 'Tốc độ TB hiện tại', val: currentRate, unit: '/th',
-      sub: 'BN/tháng', color: '#e67e22' },
+    { label: 'Tốc độ TB thực tế', val: currentRate, unit: '/th',
+      sub: `BN/tháng (${elapsedDays} ngày)`, color: '#e67e22' },
     { label: 'Cần đạt để kịp hạn', val: neededRate, unit: '/th',
-      sub: `trong ${remainingMonths} tháng còn lại`, color: '#7b5ea7' },
+      sub: `trong ${remainingMonths.toFixed(1)} tháng còn lại`, color: '#7b5ea7' },
   ];
 
   return (

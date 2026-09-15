@@ -151,9 +151,10 @@ function SiteCard({ site, onClick, onEdit, canEdit }) {
 
 const MONTHS_VI = ['','Th.1','Th.2','Th.3','Th.4','Th.5','Th.6','Th.7','Th.8','Th.9','Th.10','Th.11','Th.12'];
 
-// ── Projection chart ────────────────────────────────────────────────
+// ── Projection charts (monthly / weekly / 24-month cumulative) ────────
 
 const TOTAL_TARGET = 418;
+const STUDY_START_MS = new Date('2026-08-17').getTime();
 
 const STUDY_MONTH_KEYS = (() => {
   const out = [];
@@ -165,6 +166,143 @@ const STUDY_MONTH_KEYS = (() => {
   return out;
 })();
 
+// ── Monthly Rate Chart (chart chính — hiển thị thu tuyển từng tháng) ─
+function MonthlyRateChart({ enrollByMonth, target, currentRateNum }) {
+  const fullMinRate = target / 24;
+  const months = (enrollByMonth || []);
+  if (months.length === 0) return null;
+
+  const today = Date.now();
+  const enriched = months.map(entry => {
+    const [mo, yr] = entry.month.split('/');
+    const mStartMs = new Date(+yr, +mo - 1, 1).getTime();
+    const mEndMs   = new Date(+yr, +mo,     1).getTime();
+    const mDays    = new Date(+yr, +mo,     0).getDate();
+    const isCurrentMonth = today >= mStartMs && today < mEndMs;
+    // How many study days fall in this month?
+    const studyStartInMonth = Math.max(mStartMs, STUDY_START_MS);
+    const periodEnd = Math.min(mEndMs, today);
+    const studyDays = Math.max(0, Math.ceil((periodEnd - studyStartInMonth) / 86400000));
+    const adjMin = fullMinRate * (studyDays / mDays);
+    return { ...entry, isCurrentMonth, studyDays, mDays, adjMin };
+  });
+
+  // Thêm 2 tháng dự báo
+  const forecastArr = [];
+  if (currentRateNum > 0 && months.length > 0) {
+    const [lastMo, lastYr] = months[months.length - 1].month.split('/');
+    let mo = +lastMo, yr = +lastYr;
+    for (let i = 0; i < 2; i++) {
+      if (++mo > 12) { mo = 1; yr++; }
+      forecastArr.push({ month: `${String(mo).padStart(2,'0')}/${yr}`, count: Math.round(currentRateNum), adjMin: fullMinRate, studyDays: 30, mDays: 30, isForecast: true });
+    }
+  }
+
+  const all = [...enriched, ...forecastArr];
+  const maxCount = Math.max(...all.map(m => m.count), Math.ceil(fullMinRate * 1.4), 10);
+  const W = 700, H = 210, PAD = { t: 24, r: 110, b: 50, l: 44 };
+  const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
+  const barW = Math.min(72, Math.max(30, Math.floor(iW / all.length) - 14));
+  const xOf = i => PAD.l + (i + 0.5) * (iW / all.length);
+  const yOf = v => PAD.t + iH - (v / (maxCount * 1.2)) * iH;
+  const minY = yOf(fullMinRate);
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:6 }}>
+        <div style={{ fontSize:13, fontWeight:600, color:'var(--text)' }}>Thu tuyển từng tháng</div>
+        <div style={{ fontSize:11, color:'var(--muted)' }}>
+          Ngưỡng đầy đủ {fullMinRate.toFixed(1)} BN/tháng · Tháng 8 tính từ 17/8
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', display:'block' }}>
+        {/* Vùng dưới ngưỡng */}
+        <rect x={PAD.l} y={minY} width={iW} height={PAD.t + iH - minY} fill="rgba(244,67,54,0.05)" />
+
+        {/* Grid */}
+        {[0, Math.round(fullMinRate / 2), Math.round(fullMinRate), Math.round(maxCount * 0.75)].filter((v,i,a)=>a.indexOf(v)===i).map(v => (
+          <g key={v}>
+            <line x1={PAD.l} x2={W-PAD.r} y1={yOf(v)} y2={yOf(v)} stroke="var(--border)" strokeWidth="1" strokeDasharray={v===0?'':'3,3'} opacity="0.7" />
+            <text x={PAD.l-4} y={yOf(v)+4} fontSize="10" textAnchor="end" fill="var(--muted)">{v}</text>
+          </g>
+        ))}
+
+        {/* Đường ngưỡng tối thiểu đầy đủ */}
+        <line x1={PAD.l} x2={W-PAD.r} y1={minY} y2={minY} stroke="#FF6D00" strokeWidth="2" strokeDasharray="6,4" opacity="0.9" />
+        <text x={W-PAD.r+6} y={minY-4} fontSize="10" fill="#FF6D00" fontWeight="700">Tối thiểu</text>
+        <text x={W-PAD.r+6} y={minY+9} fontSize="9" fill="#FF6D00">{fullMinRate.toFixed(1)}/th</text>
+
+        {/* Đường ngưỡng điều chỉnh cho tháng một phần */}
+        {enriched.map((m, i) => m.adjMin < fullMinRate * 0.95 && (
+          <line key={i} x1={xOf(i)-barW/2-3} x2={xOf(i)+barW/2+3}
+            y1={yOf(m.adjMin)} y2={yOf(m.adjMin)}
+            stroke="#FF6D00" strokeWidth="1.5" strokeDasharray="3,2" opacity="0.65" />
+        ))}
+
+        {/* Bars */}
+        {all.map((m, i) => {
+          const isForecast = m.isForecast;
+          const isAbove = m.count >= m.adjMin;
+          const color = isForecast ? '#64B5F6' : isAbove ? '#00C4A7' : m.count >= m.adjMin * 0.6 ? '#FF9800' : '#F44336';
+          const barH = Math.max(2, (m.count / (maxCount * 1.2)) * iH);
+          const bx = xOf(i) - barW/2, by = PAD.t + iH - barH;
+          const [mo, yr] = m.month.split('/');
+          const opa = isForecast ? 0.45 : m.isCurrentMonth ? 0.65 : 0.88;
+          return (
+            <g key={i}>
+              <rect x={bx} y={by} width={barW} height={barH} fill={color} rx="3" opacity={opa} />
+              {(isForecast || m.isCurrentMonth) && (
+                <rect x={bx} y={by} width={barW} height={barH} fill="none"
+                  stroke={color} strokeWidth="1.5" strokeDasharray="5,3" rx="3" opacity="0.9" />
+              )}
+              {m.count > 0 && (
+                <text x={xOf(i)} y={by-5} fontSize="14" textAnchor="middle" fill={isForecast ? '#64B5F6' : color} fontWeight="700">
+                  {m.count}{isForecast ? '~' : ''}
+                </text>
+              )}
+              {/* Ghi chú số ngày tháng một phần */}
+              {!isForecast && m.studyDays < m.mDays && (
+                <text x={xOf(i)} y={by-20} fontSize="8" textAnchor="middle" fill="var(--muted)" fontStyle="italic">({m.studyDays}ng)</text>
+              )}
+              <text x={xOf(i)} y={H-32} fontSize="12" textAnchor="middle" fill="var(--text)" fontWeight="600">Th.{+mo}</text>
+              <text x={xOf(i)} y={H-18} fontSize="10" textAnchor="middle" fill="var(--muted)">{yr}</text>
+              {m.isCurrentMonth && !isForecast && (
+                <text x={xOf(i)} y={H-4} fontSize="8.5" textAnchor="middle" fill="#FF6D00" fontWeight="600">đang TT</text>
+              )}
+              {isForecast && (
+                <text x={xOf(i)} y={H-4} fontSize="8.5" textAnchor="middle" fill="#64B5F6">dự báo</text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Đường xu hướng + điểm thực tế */}
+        {(() => {
+          const pts = enriched.map((m,i) => m.count > 0 ? `${xOf(i).toFixed(1)},${yOf(m.count).toFixed(1)}` : null).filter(Boolean);
+          return pts.length > 1 ? <polyline points={pts.join(' ')} fill="none" stroke="#00C4A7" strokeWidth="1.5" opacity="0.45" strokeLinejoin="round" strokeLinecap="round" /> : null;
+        })()}
+        {enriched.map((m, i) => m.count > 0 && (
+          <circle key={i} cx={xOf(i)} cy={yOf(m.count)} r="5" fill="#00C4A7" stroke="white" strokeWidth="2" />
+        ))}
+      </svg>
+      <div style={{ display:'flex', gap:12, fontSize:11, color:'var(--muted)', marginTop:4, flexWrap:'wrap' }}>
+        {[
+          { c:'#00C4A7', label:'Đạt/vượt ngưỡng' },
+          { c:'#FF9800', label:'60–99% ngưỡng' },
+          { c:'#F44336', label:'Dưới ngưỡng' },
+          { c:'#64B5F6', label:'Dự báo theo tốc độ hiện tại', dash:true },
+        ].map(l => (
+          <span key={l.label} style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <span style={{ width:10, height:10, background:l.c, borderRadius:2, display:'inline-block', border:l.dash?`1.5px dashed ${l.c}`:'none', opacity:l.dash?0.6:1 }} />
+            {l.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Weekly Rate Chart ────────────────────────────────────────────────
 function WeeklyRateChart({ enrollByWeek, target }) {
   const weeks = (enrollByWeek || []);
   if (weeks.length === 0) return null;
@@ -365,29 +503,51 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
       {/* Actual line */}
       {(() => {
         const p = ptStr(actualCumul);
-        return p ? (
+        if (!p) return null;
+        const lastActI = actualCumul.reduce((mx, v, i) => (v !== null ? i : mx), -1);
+        const lastActV = lastActI >= 0 ? actualCumul[lastActI] : null;
+        return (
           <g>
             <polyline points={p} fill="none" stroke="#00C4A7" strokeWidth="2.5"
               strokeLinejoin="round" strokeLinecap="round" />
-            {actualCumul.map((v, i) => v !== null ? (
-              <circle key={i} cx={xOf(i)} cy={yOf(v)} r="4" fill="#00C4A7" stroke="white" strokeWidth="1.5" />
+            {/* Tất cả điểm dữ liệu — nhỏ */}
+            {actualCumul.map((v, i) => (v !== null && i < lastActI) ? (
+              <circle key={i} cx={xOf(i)} cy={yOf(v)} r="3.5" fill="#00C4A7" stroke="white" strokeWidth="1.5" />
             ) : null)}
+            {/* Điểm hiện tại — lớn hơn với chú thích */}
+            {lastActV !== null && (() => {
+              const cx = xOf(lastActI), cy = yOf(lastActV);
+              const lblRight = lastActI < 18;
+              const lx = lblRight ? cx + 10 : cx - 10;
+              const anchor = lblRight ? 'start' : 'end';
+              return (
+                <g>
+                  {/* Vòng tròn ngoài (glow) */}
+                  <circle cx={cx} cy={cy} r="11" fill="rgba(0,196,167,0.18)" />
+                  <circle cx={cx} cy={cy} r="7" fill="#00C4A7" stroke="white" strokeWidth="2" />
+                  {/* Label "Hiện tại: X BN" */}
+                  <text x={lx} y={cy - 8} fontSize="9" textAnchor={anchor} fill="#00C4A7" fontWeight="700">
+                    ▶ Hiện tại
+                  </text>
+                  <text x={lx} y={cy + 5} fontSize="11" textAnchor={anchor} fill="#00C4A7" fontWeight="800">
+                    {lastActV} BN
+                  </text>
+                </g>
+              );
+            })()}
           </g>
-        ) : null;
+        );
       })()}
 
-      {/* Now marker */}
+      {/* Now marker (vertical dashed line) */}
       {(() => {
-        const elapsed = Math.max(0, Date.now() - new Date('2026-08-17').getTime());
+        const elapsed = Math.max(0, Date.now() - STUDY_START_MS);
         const eMonths = elapsed / (30.4375 * 86400000);
         if (eMonths <= 0) return null;
         const nowX = PAD.l + Math.min(eMonths, 23.9) * (innerW / 24);
         return (
-          <g>
-            <line x1={nowX} x2={nowX} y1={PAD.t} y2={PAD.t + innerH}
-              stroke="#00C4A7" strokeWidth="1" strokeDasharray="3,4" opacity="0.5" />
-            <text x={nowX + 3} y={PAD.t + 11} fontSize="9" fill="#00C4A7" opacity="0.85">Hiện tại</text>
-          </g>
+          <line x1={nowX} x2={nowX} y1={PAD.t} y2={PAD.t + innerH}
+            stroke="#00C4A7" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
         );
       })()}
 
@@ -407,8 +567,6 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
 
 function ProjectionSection({ enrollByMonth, enrollByWeek, patientsTotal, total_target }) {
   const target = Math.max(total_target || 0, TOTAL_TARGET);
-  // Tính từ ngày khởi động thực tế (17/8/2026), không đếm tháng dương lịch
-  const STUDY_START_MS = new Date('2026-08-17').getTime();
   const elapsedMs = Math.max(0, Date.now() - STUDY_START_MS);
   const elapsedDays = Math.floor(elapsedMs / 86400000);
   const elapsedMonths = elapsedMs / (30.4375 * 86400000);
@@ -464,35 +622,48 @@ function ProjectionSection({ enrollByMonth, enrollByWeek, patientsTotal, total_t
         ))}
       </div>
 
-      <ProjectionSvg enrollByMonth={enrollByMonth} target={target} currentRateNum={currentRateNum} />
+      {/* Chart 1: Thu tuyển từng tháng (primary) */}
+      {enrollByMonth && enrollByMonth.length > 0 && (
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 16 }}>
+          <MonthlyRateChart enrollByMonth={enrollByMonth} target={target} currentRateNum={currentRateNum} />
+        </div>
+      )}
 
-      <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginTop:10,
-        fontSize:11, color:'var(--muted)', alignItems:'center' }}>
-        {[
-          { stroke:'#00C4A7', w:2.5, dash:'',    label:'Thực tế (lũy kế)' },
-          { stroke:'#00C853', w:1.8, dash:'8,4', label:`Dự báo tốc độ hiện tại (~${currentRate}/th)` },
-          { stroke:'#FF6D00', w:2,   dash:'6,4', label:`Ngưỡng tối thiểu (~${(target/24).toFixed(1)}/th)` },
-        ].map(l => (
-          <span key={l.label} style={{ display:'flex', alignItems:'center', gap:5 }}>
-            <svg width="22" height="8" style={{ flexShrink:0 }}>
-              <line x1="0" y1="4" x2="22" y2="4" stroke={l.stroke}
-                strokeWidth={l.w} strokeDasharray={l.dash || undefined} />
-            </svg>
-            {l.label}
-          </span>
-        ))}
-        <span style={{ display:'flex', alignItems:'center', gap:5 }}>
-          <span style={{ width:14, height:10, background:'rgba(244,67,54,0.15)',
-            border:'1px solid rgba(244,67,54,0.4)', borderRadius:2, flexShrink:0 }} />
-          Vùng nguy hiểm (dưới ngưỡng)
-        </span>
-      </div>
-
+      {/* Chart 2: Thu tuyển từng tuần */}
       {enrollByWeek && enrollByWeek.length > 0 && (
         <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16 }}>
           <WeeklyRateChart enrollByWeek={enrollByWeek} target={target} />
         </div>
       )}
+
+      {/* Chart 3: Dự báo lũy kế 24 tháng (summary) */}
+      <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16 }}>
+        <div style={{ fontSize:13, fontWeight:600, color:'var(--text)', marginBottom:8 }}>
+          Lũy kế & Dự báo — 24 tháng
+        </div>
+        <ProjectionSvg enrollByMonth={enrollByMonth} target={target} currentRateNum={currentRateNum} />
+        <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginTop:8,
+          fontSize:11, color:'var(--muted)', alignItems:'center' }}>
+          {[
+            { stroke:'#00C4A7', w:2.5, dash:'',    label:'Thực tế (lũy kế)' },
+            { stroke:'#00C853', w:1.8, dash:'8,4', label:`Dự báo tốc độ hiện tại (~${currentRate}/th)` },
+            { stroke:'#FF6D00', w:2,   dash:'6,4', label:`Ngưỡng tối thiểu (~${(target/24).toFixed(1)}/th)` },
+          ].map(l => (
+            <span key={l.label} style={{ display:'flex', alignItems:'center', gap:5 }}>
+              <svg width="22" height="8" style={{ flexShrink:0 }}>
+                <line x1="0" y1="4" x2="22" y2="4" stroke={l.stroke}
+                  strokeWidth={l.w} strokeDasharray={l.dash || undefined} />
+              </svg>
+              {l.label}
+            </span>
+          ))}
+          <span style={{ display:'flex', alignItems:'center', gap:5 }}>
+            <span style={{ width:14, height:10, background:'rgba(244,67,54,0.15)',
+              border:'1px solid rgba(244,67,54,0.4)', borderRadius:2, flexShrink:0 }} />
+            Vùng nguy hiểm (dưới ngưỡng)
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

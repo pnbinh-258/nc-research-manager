@@ -274,16 +274,20 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
   const minRate = target / 24;
   const planCumul = STUDY_MONTH_KEYS.map((_, i) => Math.round((i + 1) * minRate));
 
-  // Dự báo theo tốc độ thu tuyển hiện tại (chiếu thẳng từ điểm cuối)
+  // Dự báo theo tốc độ hiện tại — dừng khi chạm mục tiêu
   const rate = currentRateNum || 0;
   const forecastCumul = Array(24).fill(null);
-  if (lastIdx >= 0) {
+  let foreachHitIdx = -1; // tháng dự báo đạt mục tiêu
+  if (lastIdx >= 0 && rate > 0) {
     forecastCumul[lastIdx] = lastVal;
-    for (let i = lastIdx + 1; i < 24; i++) forecastCumul[i] = Math.round(lastVal + rate * (i - lastIdx));
+    for (let i = lastIdx + 1; i < 24; i++) {
+      const proj = Math.round(lastVal + rate * (i - lastIdx));
+      forecastCumul[i] = Math.min(proj, target);
+      if (proj >= target && foreachHitIdx < 0) { foreachHitIdx = i; break; }
+    }
   }
 
-  const forecastEnd = forecastCumul[23] ?? lastVal;
-  const yMax = Math.max(forecastEnd, target) * 1.08;
+  const yMax = target * 1.12; // luôn dùng mục tiêu làm trục, tránh lên trời
   const xOf = i => PAD.l + (i + 0.5) * (innerW / 24);
   const yOf = v => PAD.t + innerH - (v / yMax) * innerH;
   const ptStr = arr => arr.map((v, i) => v !== null ? `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}` : null).filter(Boolean).join(' ');
@@ -329,11 +333,32 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
           <polyline points={ptStr(forecastCumul)} fill="none"
             stroke="#00C853" strokeWidth="1.8" strokeDasharray="8,4"
             strokeLinejoin="round" opacity="0.9" />
-          {forecastCumul[23] !== null && (
-            <text x={W - PAD.r + 4} y={yOf(forecastCumul[23]) + 4} fontSize="10" fill="#00C853" fontWeight="700">
-              {forecastCumul[23]}
-            </text>
-          )}
+          {/* Điểm đạt mục tiêu — đánh dấu nếu đường kết thúc trước tháng 24 */}
+          {foreachHitIdx > 0 && foreachHitIdx < 24 && (() => {
+            const hx = xOf(foreachHitIdx), hy = yOf(target);
+            const [mo] = STUDY_MONTH_KEYS[foreachHitIdx].split('/');
+            return (
+              <g>
+                <circle cx={hx} cy={hy} r="5" fill="#00C853" stroke="white" strokeWidth="1.5" />
+                <text x={hx} y={hy - 9} fontSize="9" textAnchor="middle" fill="#00C853" fontWeight="700">
+                  ✓ Đạt {target} BN
+                </text>
+                <text x={hx} y={hy - 20} fontSize="8" textAnchor="middle" fill="#00C853" opacity="0.8">
+                  {MONTHS_VI[+mo]}
+                </text>
+              </g>
+            );
+          })()}
+          {/* Nếu đường kết thúc ở tháng 24 (chưa đạt) — hiện giá trị cuối */}
+          {foreachHitIdx < 0 && (() => {
+            const last = forecastCumul.reduce((v, c, i) => (c !== null ? i : v), -1);
+            const val = last >= 0 ? forecastCumul[last] : null;
+            return val !== null ? (
+              <text x={xOf(last) + 6} y={yOf(val) + 4} fontSize="10" fill="#00C853" fontWeight="700">
+                {val}
+              </text>
+            ) : null;
+          })()}
         </g>
       )}
 

@@ -775,54 +775,136 @@ function SvgChart({ enriched, siteIds, mode, totalTarget }) {
         );
       })}
 
-      {/* Cumulative actual line + area */}
-      {withCum.length > 1 && (() => {
-        const pts = withCum.map((m, i) => `${cx_(i)},${byCum(m.cumAct)}`);
-        const area = [`${cx_(0)},${PAD.t + innerH}`, ...pts, `${cx_(n-1)},${PAD.t + innerH}`].join(' ');
-        return (
-          <g>
-            <polygon points={area} fill="#f39c12" opacity="0.07"/>
-            <polyline points={pts.join(' ')} fill="none" stroke="#f39c12" strokeWidth="2.5" strokeLinejoin="round"/>
-            {withCum.map((m, i) => <circle key={i} cx={cx_(i)} cy={byCum(m.cumAct)} r={hovered === i ? 6 : 3.5} fill="#f39c12" stroke="white" strokeWidth="2"/>)}
-          </g>
-        );
-      })()}
-
-      {/* Planned cumulative line (nếu có target) */}
-      {totalTarget > 0 && (() => {
-        const pts = enriched.map((m, i) => `${cx_(i)},${byCum(m.planned || 0)}`).join(' ');
-        return (
-          <g>
-            <polyline points={pts} fill="none" stroke="#d32f2f" strokeWidth="1.5" strokeDasharray="8,4" opacity="0.7"/>
-            {enriched.map((m, i) => (
-              <circle key={i} cx={cx_(i)} cy={byCum(m.planned || 0)} r="2.5" fill="#d32f2f" opacity="0.7"/>
-            ))}
-          </g>
-        );
-      })()}
-
-      {/* Labels cuối đường */}
-      {withCum.length > 0 && (() => {
-        const last = withCum[n-1];
-        const lx = cx_(n-1), ly = byCum(last.cumAct);
-        return (
-          <g>
-            <rect x={lx + 6} y={ly - 11} width={42} height={20} rx="4" fill="#f39c12"/>
-            <text x={lx + 27} y={ly + 4} fontSize="11" fontWeight="800" textAnchor="middle" fill="white">{last.cumAct}</text>
-          </g>
-        );
-      })()}
-      {totalTarget > 0 && enriched.length > 0 && (() => {
-        const last = enriched[n-1];
-        const lx = cx_(n-1), ly = byCum(last.planned || 0);
-        return (
-          <g>
-            <rect x={lx + 6} y={ly - 11} width={42} height={20} rx="4" fill="#d32f2f" opacity="0.85"/>
-            <text x={lx + 27} y={ly + 4} fontSize="11" fontWeight="700" textAnchor="middle" fill="white">{last.planned}</text>
-          </g>
-        );
-      })()}
     </svg>
+  );
+}
+
+// ── Cumulative Progress Chart ────────────────────────────────────────
+// Hiển thị lũy kế thực tế vs kế hoạch với scale riêng (không đè bars)
+function CumulativeProgressChart({ enriched, totalTarget }) {
+  if (!enriched || enriched.length === 0) return null;
+  let cum = 0;
+  const withCum = enriched.map(m => { cum += m.count; return { ...m, cumAct: cum }; });
+  const lastActual = withCum[withCum.length - 1].cumAct;
+  const lastPlanned = enriched[enriched.length - 1].planned || 0;
+  const diff = lastActual - lastPlanned;
+  const pct = totalTarget > 0 ? (lastActual / totalTarget) * 100 : 0;
+  const plannedPct = totalTarget > 0 ? (lastPlanned / totalTarget) * 100 : 0;
+
+  // Scale cho mini chart: adaptive để 2 đường tách nhau rõ
+  const maxVal = Math.max(lastActual, lastPlanned) * 1.25;
+  const W = 700, H = 150, PAD = { t: 24, r: 90, b: 30, l: 44 };
+  const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
+  const n = enriched.length;
+  const xOf = i => n === 1 ? PAD.l + iW / 2 : PAD.l + (i / (n - 1)) * iW;
+  const yOf = v => PAD.t + iH - (v / maxVal) * iH;
+
+  const actPts = withCum.map((m, i) => `${xOf(i).toFixed(1)},${yOf(m.cumAct).toFixed(1)}`).join(' ');
+  const planPts = enriched.map((m, i) => `${xOf(i).toFixed(1)},${yOf(m.planned || 0).toFixed(1)}`).join(' ');
+  const areaPts = `${xOf(0).toFixed(1)},${(PAD.t + iH).toFixed(1)} ${actPts} ${xOf(n - 1).toFixed(1)},${(PAD.t + iH).toFixed(1)}`;
+
+  const diffColor = diff >= 0 ? '#2e7d32' : '#d32f2f';
+  const diffLabel = diff >= 0 ? `+${diff} BN vượt kế hoạch` : `${diff} BN chậm kế hoạch`;
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border)' }}>
+      {/* Header: Progress bar tổng quát */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:6 }}>
+        <div style={{ fontSize:13, fontWeight:600 }}>Tiến độ lũy kế vs kế hoạch</div>
+        <div style={{ fontSize:11, color: diffColor, fontWeight:700 }}>{diffLabel}</div>
+      </div>
+
+      {/* Progress bar ngang: actual vs target với marker kế hoạch */}
+      <div style={{ position:'relative', height:28, background:'var(--bg, #f5f7fa)',
+        border:'1px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:6 }}>
+        {/* actual filled */}
+        <div style={{ position:'absolute', inset:'0 auto 0 0', width:`${Math.min(pct,100)}%`,
+          background:'linear-gradient(90deg, #f39c12, #e67e22)', borderRadius:14,
+          transition:'width .3s', boxShadow:'0 1px 3px rgba(243,156,18,.3)' }} />
+        {/* Planned marker */}
+        {plannedPct > 0 && plannedPct < 100 && (
+          <div style={{ position:'absolute', top:-2, bottom:-2, left:`${plannedPct}%`,
+            width:2, background:'#d32f2f', boxShadow:'0 0 0 1px white' }}>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)',
+              fontSize:9, fontWeight:700, color:'#d32f2f', whiteSpace:'nowrap' }}>▼ KH {lastPlanned}</div>
+          </div>
+        )}
+        {/* Label số bên trong */}
+        <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center',
+          justifyContent:'space-between', padding:'0 12px', fontSize:12, fontWeight:700,
+          color: pct > 15 ? 'white' : 'var(--text)', textShadow: pct > 15 ? '0 1px 2px rgba(0,0,0,.3)' : 'none' }}>
+          <span>{lastActual} / {totalTarget} BN</span>
+          <span style={{ color: pct > 90 ? 'white' : 'var(--text)' }}>{pct.toFixed(1)}%</span>
+        </div>
+      </div>
+
+      {/* Mini line chart: 2 đường lũy kế có scale riêng, tách nhau rõ */}
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', display:'block', overflow:'visible' }}>
+        {/* Grid ngang */}
+        {[0, 0.5, 1].map(f => {
+          const y = PAD.t + iH * (1 - f);
+          const v = Math.round(maxVal * f);
+          return (
+            <g key={f}>
+              <line x1={PAD.l} x2={W-PAD.r} y1={y} y2={y}
+                stroke={f===0?'var(--text)':'var(--border)'} strokeWidth={f===0?1.5:1}
+                strokeDasharray={f>0?'3,3':''} opacity={f>0?0.5:1} />
+              {f > 0 && <text x={PAD.l-6} y={y+4} fontSize="10" textAnchor="end" fill="var(--muted)">{v}</text>}
+            </g>
+          );
+        })}
+
+        {/* Area dưới actual */}
+        <polygon points={areaPts} fill="url(#cumGrad)" opacity="0.15" />
+        <defs>
+          <linearGradient id="cumGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f39c12" stopOpacity="0.6"/>
+            <stop offset="100%" stopColor="#f39c12" stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+
+        {/* Planned line */}
+        <polyline points={planPts} fill="none" stroke="#d32f2f" strokeWidth="2" strokeDasharray="7,4" opacity="0.85"/>
+        {enriched.map((m, i) => (
+          <circle key={`p${i}`} cx={xOf(i)} cy={yOf(m.planned||0)} r="3" fill="#d32f2f" stroke="white" strokeWidth="1.5"/>
+        ))}
+
+        {/* Actual line */}
+        <polyline points={actPts} fill="none" stroke="#f39c12" strokeWidth="2.8" strokeLinejoin="round" strokeLinecap="round"/>
+        {withCum.map((m, i) => (
+          <circle key={`a${i}`} cx={xOf(i)} cy={yOf(m.cumAct)} r="4" fill="#f39c12" stroke="white" strokeWidth="2"/>
+        ))}
+
+        {/* End labels với leader line */}
+        {(() => {
+          const i = n - 1;
+          const ax = xOf(i), ay = yOf(lastActual);
+          const py = yOf(lastPlanned);
+          // Chống đè nếu 2 label quá sát
+          const overlap = Math.abs(ay - py) < 18;
+          const actLy = overlap && ay > py ? ay + 8 : ay;
+          const plnLy = overlap && py > ay ? py + 8 : py;
+          return (
+            <g>
+              {/* Actual label */}
+              <line x1={ax+4} x2={ax+16} y1={actLy} y2={actLy} stroke="#f39c12" strokeWidth="1.5"/>
+              <rect x={ax+16} y={actLy-11} width={52} height={22} rx="4" fill="#f39c12"/>
+              <text x={ax+16+26} y={actLy+5} fontSize="12" fontWeight="800" textAnchor="middle" fill="white">{lastActual} TT</text>
+              {/* Planned label */}
+              <line x1={ax+4} x2={ax+16} y1={plnLy} y2={plnLy} stroke="#d32f2f" strokeWidth="1.2" strokeDasharray="3,2"/>
+              <rect x={ax+16} y={plnLy-10} width={52} height={20} rx="4" fill="#d32f2f" opacity="0.9"/>
+              <text x={ax+16+26} y={plnLy+5} fontSize="11" fontWeight="700" textAnchor="middle" fill="white">{lastPlanned} KH</text>
+            </g>
+          );
+        })()}
+
+        {/* X labels */}
+        {enriched.map((m, i) => {
+          const [mo] = m.month.split('/');
+          return <text key={i} x={xOf(i)} y={H-10} fontSize="10" textAnchor="middle" fill="var(--muted)">{MONTHS_VI[+mo] || mo}</text>;
+        })}
+      </svg>
+    </div>
   );
 }
 
@@ -921,7 +1003,12 @@ function EnrollChart({ data, sites, siteIds, totalTarget }) {
 
       {mode === 'persite'
         ? <SiteSparklines data={data} siteIds={ids} />
-        : <SvgChart enriched={enriched} siteIds={ids} mode={mode} totalTarget={totalTarget} />
+        : (
+          <>
+            <SvgChart enriched={enriched} siteIds={ids} mode={mode} totalTarget={totalTarget} />
+            {totalTarget > 0 && <CumulativeProgressChart enriched={enriched} totalTarget={totalTarget} />}
+          </>
+        )
       }
     </div>
   );

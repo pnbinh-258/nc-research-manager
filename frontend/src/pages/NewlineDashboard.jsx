@@ -153,7 +153,7 @@ const MONTHS_VI = ['','Th.1','Th.2','Th.3','Th.4','Th.5','Th.6','Th.7','Th.8','T
 
 // ── Projection charts (monthly / weekly / 24-month cumulative) ────────
 
-const TOTAL_TARGET = 418;
+const TOTAL_TARGET = 416;
 const STUDY_START_MS = new Date('2026-08-17').getTime();
 
 const STUDY_MONTH_KEYS = (() => {
@@ -408,7 +408,7 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
   const lastIdx = actualCumul.reduce((mx, v, i) => (v !== null ? i : mx), -1);
   const lastVal = lastIdx >= 0 ? actualCumul[lastIdx] : 0;
 
-  // Ngưỡng tối thiểu cần đạt mỗi tháng để kịp 418 BN
+  // Ngưỡng tối thiểu cần đạt mỗi tháng để kịp 416 BN
   const minRate = target / 24;
   const planCumul = STUDY_MONTH_KEYS.map((_, i) => Math.round((i + 1) * minRate));
 

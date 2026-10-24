@@ -956,22 +956,31 @@ function nlDashboard_() {
   });
   alerts.sort(function(a, b) { return a.level === 'red' && b.level !== 'red' ? -1 : b.level === 'red' && a.level !== 'red' ? 1 : 0; });
 
-  // Tổng target và kế hoạch tuyển theo tháng (linear, 24 tháng, tối thiểu 416 BN)
+  // Tổng target và kế hoạch tuyển theo tháng (linear theo NGÀY THỰC TẾ, không theo tháng dương lịch)
+  // Tuyển bệnh chỉ bắt đầu từ 17/08/2026 — tháng 8 chỉ có 15 ngày, không phải tháng đủ.
   var sitesSum = sites.reduce(function(s, site) { return s + (parseInt(site.target_enrollment) || 0); }, 0);
   var totalTarget = Math.max(sitesSum, 416);
-  var STUDY_MONTHS = 24;
-  var plannedPerMonth = totalTarget / STUDY_MONTHS;
+  var STUDY_START = new Date(2026, 7, 17); // 17/08/2026 — ngày khởi động tuyển bệnh thực tế
+  var STUDY_END = new Date(2028, 7, 17);   // 24 tháng sau (exclusive)
+  var totalStudyDays = Math.round((STUDY_END - STUDY_START) / 86400000);
+  var dailyRate = totalTarget / totalStudyDays;
+  var plannedPerMonth = totalTarget / 24; // chỉ để hiển thị ngưỡng/tháng đủ, không dùng cho lũy kế
 
   var siteIds = sites.map(function(s) { return s.site_id; });
   var enrollByMonth = [];
-  var studyStart = new Date(2026, 7, 1); // 01/08/2026
+  var studyStart = new Date(2026, 7, 1); // 01/08/2026 — mốc gộp dữ liệu theo tháng dương lịch
   var cur = new Date(studyStart.getFullYear(), studyStart.getMonth(), 1);
-  var monthIndex = 0;
   while (cur <= today) {
     var me = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     var ms2 = new Date(cur);
+
+    // Ngày cuối mà entry này bao phủ: hết tháng nếu tháng đã qua, hoặc hôm nay nếu đang là tháng hiện tại
+    var asOf = me <= today ? new Date(me.getTime() - 86400000) : today;
+    var daysSinceStart = Math.max(0, Math.floor((asOf - STUDY_START) / 86400000) + 1);
+    var plannedCum = Math.round(dailyRate * daysSinceStart);
+
     var entry = { month: (cur.getMonth() + 1) + '/' + cur.getFullYear(), count: 0,
-      planned: Math.round(plannedPerMonth * (monthIndex + 1)), // planned cumulative
+      planned: plannedCum, // lũy kế kế hoạch tính theo số ngày thực tế từ 17/08
       planned_month: Math.round(plannedPerMonth) };
     siteIds.forEach(function(sid) {
       var cnt = patients.filter(function(p) {
@@ -983,7 +992,6 @@ function nlDashboard_() {
     });
     enrollByMonth.push(entry);
     cur = me;
-    monthIndex++;
   }
 
   // Thu tuyển theo tuần (từ 17/8/2026)

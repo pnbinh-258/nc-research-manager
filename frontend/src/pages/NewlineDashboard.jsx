@@ -18,12 +18,14 @@ const SITES_META = [
   { site_id: 'CTH',   site_name: 'ĐKTW Cần Thơ',       city: 'Cần Thơ'   },
   { site_id: 'UHU',   site_name: 'Trung Ương Huế',     city: 'Huế'       },
   { site_id: 'CDO',   site_name: 'Châu Đốc',           city: 'An Giang'  },
+  { site_id: 'UMC',   site_name: 'BV ĐHYD TPHCM',      city: 'TP. HCM'   },
 ];
 
 const SITE_COLOR = {
   ND115:'#1a73e8', TNH:'#0f9688', QY175:'#7b5ea7',
   DNA:'#e67e22',   VTI:'#e74c3c', YHN:'#2ecc71',
   QY103:'#3498db', CTH:'#9b59b6', UHU:'#f39c12', CDO:'#1abc9c',
+  UMC:'#c0392b',
 };
 
 function StatCard({ label, value, sub, color }) {
@@ -1095,7 +1097,7 @@ export default function NewlineDashboard({ user }) {
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
             <span style={{ color: '#0f5132', marginRight: 8 }}>🏥</span>NEWLINE
           </h1>
-          <div className="muted" style={{ marginTop: 4 }}>Nghiên cứu đa trung tâm · 10 site · Kết cục mRS 3 tháng</div>
+          <div className="muted" style={{ marginTop: 4 }}>Nghiên cứu đa trung tâm · {SITES_META.length} site · Kết cục mRS 3 tháng</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <a href="#/newline/patients">
@@ -1141,7 +1143,7 @@ export default function NewlineDashboard({ user }) {
         <StatCard label="Sắp đến hạn (≤7 ngày)" value={upcoming_total} color={upcoming_total > 0 ? '#e67e22' : '#aaa'} />
         <StatCard label="Site đang Recruiting"
           value={sites.filter(s => s.status === 'Recruiting').length}
-          sub={'/ 10 site'} color="#7b5ea7" />
+          sub={'/ ' + SITES_META.length + ' site'} color="#7b5ea7" />
       </div>
 
       {/* Site grid */}

@@ -314,7 +314,8 @@ function handleRequest(params, body) {
       case 'nlAddPatient':    requireRole_(user, ['admin','investigator']); result = nlAddPatient_(body.data); invalidateNlCache_(); break;
       case 'nlUpdatePatient': requireRole_(user, ['admin','investigator']); result = nlUpdatePatientRow_(body.data); invalidateNlCache_(); break;
       case 'nlDeletePatient': requireRole_(user, ['admin']); result = nlDeletePatient_(body.data.patient_id); invalidateNlCache_(); break;
-      case 'nlUpdateSite':    requireRole_(user, ['admin']); result = nlUpdateSiteRow_(body.data); break;
+      case 'nlAddSite':       requireRole_(user, ['admin']); result = nlAddSite_(body.data); invalidateNlCache_(); break;
+      case 'nlUpdateSite':    requireRole_(user, ['admin']); result = nlUpdateSiteRow_(body.data); invalidateNlCache_(); break;
 
       default:
         return json_({ ok: false, error: 'UNKNOWN_ACTION', action: action });
@@ -901,6 +902,16 @@ function nlDeletePatient_(patientId) {
     }
   }
   throw new Error('Không tìm thấy ' + patientId);
+}
+
+function nlAddSite_(data) {
+  var existing = nlReadSheet_(NL_SHEETS.SITES);
+  if (existing.some(function(s) { return String(s.site_id) === String(data.site_id); })) {
+    throw new Error('site_id đã tồn tại: ' + data.site_id);
+  }
+  var headers = NL_SCHEMA[NL_SHEETS.SITES];
+  getSheet_(NL_SHEETS.SITES).appendRow(headers.map(function(h) { return data[h] != null ? data[h] : ''; }));
+  return data;
 }
 
 function nlUpdateSiteRow_(data) {

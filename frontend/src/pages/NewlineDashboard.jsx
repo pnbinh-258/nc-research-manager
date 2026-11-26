@@ -506,14 +506,17 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
         </g>
       )}
 
-      {/* Now marker (vertical dashed line) — vẽ trước để nằm dưới điểm/ghi chú "Hiện tại" */}
+      {/* Now marker (vertical dashed line) — chỉ vẽ phần DƯỚI ghi chú "Hiện tại", tránh chạm vạch tím phía trên */}
       {(() => {
         const elapsed = Math.max(0, Date.now() - STUDY_START_MS);
         const eMonths = elapsed / (30.4375 * 86400000);
         if (eMonths <= 0) return null;
         const nowX = PAD.l + Math.min(eMonths, 23.9) * (innerW / 24);
+        const nowLineTop = lastVal !== null && lastIdx >= 0
+          ? (yOf(target) + yOf(lastVal)) / 2 + 14
+          : PAD.t;
         return (
-          <line x1={nowX} x2={nowX} y1={PAD.t} y2={PAD.t + innerH}
+          <line x1={nowX} x2={nowX} y1={nowLineTop} y2={PAD.t + innerH}
             stroke="#00C4A7" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
         );
       })()}
@@ -532,7 +535,7 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
             {actualCumul.map((v, i) => (v !== null && i < lastActI) ? (
               <circle key={i} cx={xOf(i)} cy={yOf(v)} r="3.5" fill="#00C4A7" stroke="white" strokeWidth="1.5" />
             ) : null)}
-            {/* Điểm hiện tại — lớn hơn, ghi chú đặt cố định gần đỉnh biểu đồ để không bị vạch kẻ/mốc "now" đè qua */}
+            {/* Điểm hiện tại — lớn hơn, ghi chú đặt giữa vạch mục tiêu và điểm dữ liệu để không bị vạch kẻ/mốc "now" đè qua */}
             {lastActV !== null && (() => {
               const cx = xOf(lastActI), cy = yOf(lastActV);
               const labelY = (yOf(target) + cy) / 2;

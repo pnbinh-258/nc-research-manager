@@ -506,6 +506,18 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
         </g>
       )}
 
+      {/* Now marker (vertical dashed line) — vẽ trước để nằm dưới điểm/ghi chú "Hiện tại" */}
+      {(() => {
+        const elapsed = Math.max(0, Date.now() - STUDY_START_MS);
+        const eMonths = elapsed / (30.4375 * 86400000);
+        if (eMonths <= 0) return null;
+        const nowX = PAD.l + Math.min(eMonths, 23.9) * (innerW / 24);
+        return (
+          <line x1={nowX} x2={nowX} y1={PAD.t} y2={PAD.t + innerH}
+            stroke="#00C4A7" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
+        );
+      })()}
+
       {/* Actual line */}
       {(() => {
         const p = ptStr(actualCumul);
@@ -520,40 +532,31 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
             {actualCumul.map((v, i) => (v !== null && i < lastActI) ? (
               <circle key={i} cx={xOf(i)} cy={yOf(v)} r="3.5" fill="#00C4A7" stroke="white" strokeWidth="1.5" />
             ) : null)}
-            {/* Điểm hiện tại — lớn hơn với chú thích */}
+            {/* Điểm hiện tại — lớn hơn, ghi chú đặt cố định gần đỉnh biểu đồ để không bị vạch kẻ/mốc "now" đè qua */}
             {lastActV !== null && (() => {
               const cx = xOf(lastActI), cy = yOf(lastActV);
-              const lblRight = lastActI < 18;
-              const lx = lblRight ? cx + 10 : cx - 10;
-              const anchor = lblRight ? 'start' : 'end';
+              const labelY = PAD.t + 24;
               return (
                 <g>
                   {/* Vòng tròn ngoài (glow) */}
                   <circle cx={cx} cy={cy} r="11" fill="rgba(0,196,167,0.18)" />
                   <circle cx={cx} cy={cy} r="7" fill="#00C4A7" stroke="white" strokeWidth="2" />
-                  {/* Label "Hiện tại: X BN" */}
-                  <text x={lx} y={cy - 8} fontSize="9" textAnchor={anchor} fill="#00C4A7" fontWeight="700">
+                  {/* Đường dẫn từ điểm lên ghi chú phía trên */}
+                  <line x1={cx} y1={cy - 11} x2={cx} y2={labelY + 14}
+                    stroke="#00C4A7" strokeWidth="1" strokeDasharray="2,3" opacity="0.6" />
+                  {/* Nền che vạch kẻ phía sau chữ */}
+                  <rect x={cx - 34} y={labelY - 11} width="68" height="24" rx="4"
+                    fill="var(--surface, #fff)" opacity="0.94" />
+                  <text x={cx} y={labelY - 1} fontSize="9" textAnchor="middle" fill="#00C4A7" fontWeight="700">
                     ▶ Hiện tại
                   </text>
-                  <text x={lx} y={cy + 5} fontSize="11" textAnchor={anchor} fill="#00C4A7" fontWeight="800">
+                  <text x={cx} y={labelY + 10} fontSize="11" textAnchor="middle" fill="#00C4A7" fontWeight="800">
                     {lastActV} BN
                   </text>
                 </g>
               );
             })()}
           </g>
-        );
-      })()}
-
-      {/* Now marker (vertical dashed line) */}
-      {(() => {
-        const elapsed = Math.max(0, Date.now() - STUDY_START_MS);
-        const eMonths = elapsed / (30.4375 * 86400000);
-        if (eMonths <= 0) return null;
-        const nowX = PAD.l + Math.min(eMonths, 23.9) * (innerW / 24);
-        return (
-          <line x1={nowX} x2={nowX} y1={PAD.t} y2={PAD.t + innerH}
-            stroke="#00C4A7" strokeWidth="1" strokeDasharray="3,4" opacity="0.4" />
         );
       })()}
 

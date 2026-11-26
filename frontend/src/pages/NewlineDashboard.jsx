@@ -535,7 +535,7 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
             {/* Điểm hiện tại — lớn hơn, ghi chú đặt cố định gần đỉnh biểu đồ để không bị vạch kẻ/mốc "now" đè qua */}
             {lastActV !== null && (() => {
               const cx = xOf(lastActI), cy = yOf(lastActV);
-              const labelY = PAD.t + 24;
+              const labelY = (yOf(target) + cy) / 2;
               return (
                 <g>
                   {/* Vòng tròn ngoài (glow) */}

@@ -19,13 +19,15 @@ const SITES_META = [
   { site_id: 'UHU',   site_name: 'Trung Ương Huế',     city: 'Huế'       },
   { site_id: 'CDO',   site_name: 'Châu Đốc',           city: 'An Giang'  },
   { site_id: 'UMC',   site_name: 'BV ĐHYD TPHCM',      city: 'TP. HCM'   },
+  { site_id: 'TDU',   site_name: 'BVĐK Thủ Đức',       city: 'TP. HCM'   },
+  { site_id: 'KGI',   site_name: 'BVĐK Kiên Giang',    city: 'Kiên Giang'},
 ];
 
 const SITE_COLOR = {
   ND115:'#1a73e8', TNH:'#0f9688', QY175:'#7b5ea7',
   DNA:'#e67e22',   VTI:'#e74c3c', YHN:'#2ecc71',
   QY103:'#3498db', CTH:'#9b59b6', UHU:'#f39c12', CDO:'#1abc9c',
-  UMC:'#c0392b',
+  UMC:'#c0392b',   TDU:'#8e44ad', KGI:'#16a085',
 };
 
 function StatCard({ label, value, sub, color }) {
@@ -404,7 +406,10 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
   const actualCumul = Array(24).fill(null);
   let cumActual = 0;
   (enrollByMonth || []).forEach(m => {
-    const idx = keyToIdx[m.month];
+    // API trả tháng không có số 0 đầu ("8/2026"), STUDY_MONTH_KEYS có số 0 đầu ("08/2026") — chuẩn hoá trước khi tra cứu
+    const [mo, yr] = m.month.split('/');
+    const key = `${String(+mo).padStart(2, '0')}/${yr}`;
+    const idx = keyToIdx[key];
     if (idx !== undefined) { cumActual += m.count; actualCumul[idx] = cumActual; }
   });
   const lastIdx = actualCumul.reduce((mx, v, i) => (v !== null ? i : mx), -1);
@@ -465,7 +470,6 @@ function ProjectionSvg({ enrollByMonth, target, currentRateNum }) {
       {/* Đường ngưỡng tối thiểu — cam đậm, đứt nét */}
       <polyline points={planCumul.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')}
         fill="none" stroke="#FF6D00" strokeWidth="2" strokeDasharray="6,4" opacity="0.9" />
-      <text x={W - PAD.r + 4} y={yOf(planCumul[23]) + 4} fontSize="10" fill="#FF6D00" fontWeight="700">{planCumul[23]}</text>
 
       {/* Đường dự báo tốc độ hiện tại — xanh lá đứt nét */}
       {ptStr(forecastCumul) && (
